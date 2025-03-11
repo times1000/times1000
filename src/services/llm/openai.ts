@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import { LLMMessage, LLMChatCompletionResponse, ModelConfig, LLMEmbeddingResponse, RequestContext } from './types';
 import { logLLMRequest } from './logger';
 import { calculateCost } from './pricing';
@@ -35,11 +36,27 @@ export async function chatCompletion(
     const promptText = messages.map(m => m.content).join(' ');
     const tokensPrompt = Math.round(promptText.length / 4);
     
-    // Format messages for OpenAI API
-    const openaiMessages = messages.map(m => ({
-      role: m.role,
-      content: m.content
-    }));
+    // Format messages for OpenAI API - properly handle function role
+    const openaiMessages: ChatCompletionMessageParam[] = [];
+    
+    // Process each message with proper typing
+    for (const m of messages) {
+      if (m.role === 'system') {
+        openaiMessages.push({ role: 'system', content: m.content });
+      } else if (m.role === 'user') {
+        openaiMessages.push({ role: 'user', content: m.content });
+      } else if (m.role === 'assistant') {
+        openaiMessages.push({ role: 'assistant', content: m.content });
+      } else if (m.role === 'function') {
+        if (!m.name) {
+          throw new Error('Function messages require a name property');
+        }
+        openaiMessages.push({ role: 'function', content: m.content, name: m.name });
+      } else {
+        // This should never happen due to TypeScript, but just in case
+        throw new Error(`Unknown role type: ${m.role}`);
+      }
+    }
     
     // Call OpenAI API
     const response = await client.chat.completions.create({

@@ -165,6 +165,7 @@ export async function generatePlan(
     
     const planData = JSON.parse(toolCalls[0].function.arguments);
     return processPlanData(planData, agent, includeNameAndDescription);
+    }
   } catch (error: any) {
     console.error('Error generating plan:', error);
     throw new Error(`Failed to generate plan: ${error.message}`);
@@ -223,11 +224,6 @@ function processPlanData(
   } catch (error) {
     console.error('Error processing plan data:', error);
     throw new Error('Failed to process plan data');
-  }
-}
-  } catch (error: any) {
-    console.error('Error generating plan:', error);
-    throw new Error(`Failed to generate plan: ${error.message}`);
   }
 }
 

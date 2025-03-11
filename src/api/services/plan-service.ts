@@ -701,7 +701,7 @@ Respond with a JSON array of follow-up suggestions, where each item is a clear, 
         model,
         provider,
         temperature: 0.7,
-        executionStrategy: shouldUseCodeExecution ? 'tools' : 'standard'
+        ...(shouldUseCodeExecution ? { executionStrategy: 'tools' } : {})
       },
       {
         operation: 'follow_up_generation',
