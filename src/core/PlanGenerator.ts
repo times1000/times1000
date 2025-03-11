@@ -3,6 +3,17 @@ import { Plan, PlanImpl } from './Plan';
 import { v4 as uuidv4 } from 'uuid';
 import { openai } from '../utils/ai-client';
 import * as llm from '../services/llm';
+import { 
+  SYSTEM_PROMPTS, 
+  PLAN_PROMPTS, 
+  METADATA_PROMPTS,
+  DEFAULT_MODELS,
+  TOKEN_LIMITS,
+  TEMPERATURE_SETTINGS,
+  OPERATION_NAMES,
+  createPlanTool,
+  createAgentMetadataTool
+} from '../services/llm';
 
 export interface AgentNameAndDescription {
   name: string;
@@ -22,75 +33,15 @@ export async function generatePlan(
     const messages = [
       { 
         role: 'system' as const, 
-        content: 'You are an AI assistant that generates detailed plans for autonomous agents. Your plans should be thorough, logical, and follow a step-by-step approach.'
+        content: SYSTEM_PROMPTS.PLAN_GENERATOR
       },
       { role: 'user' as const, content: prompt }
     ];
     
     console.log(`Generating plan for agent ${agent.id} with command: "${command}"`);
     
-    // Define the tool for creating plans
-    const planTool = {
-      name: 'createPlan',
-      description: 'Create a detailed execution plan with steps',
-      parameters: {
-        type: 'object',
-        properties: {
-          description: {
-            type: 'string',
-            description: 'A brief summary of what the plan will accomplish'
-          },
-          reasoning: {
-            type: 'string',
-            description: 'The reasoning behind the plan structure and approach'
-          },
-          steps: {
-            type: 'array',
-            description: 'The step-by-step execution plan',
-            items: {
-              type: 'object',
-              properties: {
-                description: {
-                  type: 'string',
-                  description: 'A description of what this step accomplishes'
-                },
-                estimatedDuration: {
-                  type: 'number',
-                  description: 'Estimated time to complete this step in seconds'
-                },
-                details: {
-                  type: 'string',
-                  description: 'Additional details about how this step will be executed'
-                }
-              },
-              required: ['description']
-            }
-          },
-          hasFollowUp: {
-            type: 'boolean',
-            description: 'Whether this plan will likely need follow-up actions'
-          },
-          followUpSuggestions: {
-            type: 'array',
-            description: 'Potential follow-up actions after plan completion',
-            items: {
-              type: 'string'
-            }
-          },
-          agentName: includeNameAndDescription ? {
-            type: 'string',
-            description: 'A concise, descriptive name for the agent based on its purpose and capabilities'
-          } : undefined,
-          agentDescription: includeNameAndDescription ? {
-            type: 'string',
-            description: 'A detailed description of what this agent does and its primary function'
-          } : undefined
-        },
-        required: includeNameAndDescription 
-          ? ['description', 'reasoning', 'steps', 'hasFollowUp', 'agentName', 'agentDescription'] 
-          : ['description', 'reasoning', 'steps', 'hasFollowUp']
-      }
-    };
+    // Use centralized tool definition
+    const planTool = createPlanTool(includeNameAndDescription);
     
     // Try to use the abstracted LLM service with tool execution
     try {
@@ -98,14 +49,14 @@ export async function generatePlan(
       const response = await llm.chatCompletion(
         messages,
         {
-          model: 'gpt-4o',
-          temperature: 0.7,
-          maxTokens: 2000,
+          model: DEFAULT_MODELS.PLAN_GENERATION,
+          temperature: TEMPERATURE_SETTINGS.PLAN_GENERATION,
+          maxTokens: TOKEN_LIMITS.PLAN_GENERATION,
           executionStrategy: 'tools', 
           tools: [planTool]
         },
         {
-          operation: 'generate_plan',
+          operation: OPERATION_NAMES.PLAN_GENERATION,
           agentId: agent.id
         }
       );
@@ -126,10 +77,10 @@ export async function generatePlan(
       // Send to the OpenAI API directly as fallback
       // We need to use the OpenAI client directly for tool calling support
       const response = await openai.chat.completions.create({
-        model: 'gpt-4o',
+        model: DEFAULT_MODELS.PLAN_GENERATION,
         messages,
-        temperature: 0.7,
-        max_tokens: 2000,
+        temperature: TEMPERATURE_SETTINGS.PLAN_GENERATION,
+        max_tokens: TOKEN_LIMITS.PLAN_GENERATION,
         tools: [{ type: 'function', function: planTool }],
         tool_choice: { type: 'function', function: { name: 'createPlan' } }
       });
@@ -138,8 +89,8 @@ export async function generatePlan(
     if (response.usage) {
       await llm.logLLMRequest({
         provider: 'openai',
-        model: 'gpt-4o',
-        operation: 'generate_plan',
+        model: DEFAULT_MODELS.PLAN_GENERATION,
+        operation: OPERATION_NAMES.PLAN_GENERATION,
         prompt: JSON.stringify(messages),
         response: JSON.stringify(response.choices[0]?.message || '{}'),
         tokenUsage: {
@@ -234,52 +185,24 @@ function processPlanData(
 export async function generateAgentMetadataFromPlan(plan: Plan): Promise<AgentNameAndDescription> {
   try {
     // Create prompt for metadata generation
-    const prompt = `
-    Based on the following plan details, generate a concise name and detailed description for an AI agent that would be responsible for executing this plan:
-    
-    Command: "${plan.command}"
-    Plan Description: "${plan.description}"
-    Plan Reasoning: "${plan.reasoning}"
-    
-    Steps (${plan.steps.length}):
-    ${plan.steps.map((step, i) => `${i+1}. ${step.description}`).join('\n')}
-    
-    The agent name should be concise and descriptive. The description should explain the agent's purpose and capabilities.
-    `;
+    const prompt = METADATA_PROMPTS.METADATA_FROM_PLAN(plan);
     
     // We still need to use the OpenAI API directly for tool calling
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: DEFAULT_MODELS.AGENT_METADATA,
       messages: [
         { 
           role: 'system' as const, 
-          content: 'You are an AI that creates concise, descriptive names and detailed descriptions for autonomous AI agents.'
+          content: SYSTEM_PROMPTS.AGENT_METADATA_CREATOR
         },
         { role: 'user' as const, content: prompt }
       ],
-      temperature: 0.7,
-      max_tokens: 300,
+      temperature: TEMPERATURE_SETTINGS.PLAN_GENERATION,
+      max_tokens: TOKEN_LIMITS.AGENT_METADATA,
       tools: [
         {
           type: 'function',
-          function: {
-            name: 'createAgentMetadata',
-            description: 'Create a name and description for an agent based on its plan',
-            parameters: {
-              type: 'object',
-              properties: {
-                name: {
-                  type: 'string',
-                  description: 'A concise, descriptive name for the agent based on its purpose'
-                },
-                description: {
-                  type: 'string',
-                  description: 'A detailed description of what this agent does and its primary function'
-                }
-              },
-              required: ['name', 'description']
-            }
-          }
+          function: createAgentMetadataTool
         }
       ],
       tool_choice: { type: 'function', function: { name: 'createAgentMetadata' } }
@@ -289,8 +212,8 @@ export async function generateAgentMetadataFromPlan(plan: Plan): Promise<AgentNa
     if (response.usage) {
       await llm.logLLMRequest({
         provider: 'openai',
-        model: 'gpt-4o',
-        operation: 'generate_agent_metadata',
+        model: DEFAULT_MODELS.AGENT_METADATA,
+        operation: OPERATION_NAMES.AGENT_METADATA,
         prompt: prompt,
         response: JSON.stringify(response.choices[0]?.message || '{}'),
         tokenUsage: {
@@ -330,26 +253,16 @@ export async function generateAgentMetadataFromPlan(plan: Plan): Promise<AgentNa
 
 
 function buildPlanningPrompt(agent: Agent, command: string, includeNameAndDescription: boolean = false): string {
-  let prompt = `Generate a detailed execution plan for the following command: "${command}"\n\n`;
+  let prompt = PLAN_PROMPTS.PLANNING_BASE(command);
   
-  prompt += `Agent Context:\n`;
-  prompt += `- Name: ${agent.name}\n`;
+  prompt += PLAN_PROMPTS.AGENT_CONTEXT(agent.name, agent.capabilities);
   
-  // Add capabilities context
-  if (agent.capabilities && agent.capabilities.length > 0) {
-    prompt += `- Capabilities: ${agent.capabilities.join(', ')}\n`;
-  } else {
-    prompt += `- Capabilities: General planning and task execution\n`;
-  }
+  prompt += PLAN_PROMPTS.PERSONALITY_PROFILE(agent.personalityProfile);
   
-  if (agent.personalityProfile) {
-    prompt += `\nPersonality Profile:\n${agent.personalityProfile}\n`;
-  }
-  
-  prompt += `\nThe plan should include a clear description, reasoning, and step-by-step actions to accomplish the command. Each step should have a description and estimated time to complete. Consider dependencies between steps and potential error cases.`;
+  prompt += PLAN_PROMPTS.PLANNING_INSTRUCTIONS;
   
   if (includeNameAndDescription) {
-    prompt += `\n\nBased on this command and plan, you should also suggest a concise, descriptive name for the agent and a detailed description of the agent's purpose and capabilities.`;
+    prompt += PLAN_PROMPTS.NAME_DESCRIPTION_REQUEST;
   }
   
   return prompt;

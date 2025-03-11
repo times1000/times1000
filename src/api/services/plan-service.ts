@@ -7,6 +7,17 @@ import { Plan } from '../../types/db';
 import { StepStatus, PlanStatus } from '../../core/Plan';
 import { Agent } from '../../core/Agent';
 import { generatePlan as generateAgentPlan, generateAgentMetadataFromPlan, AgentNameAndDescription } from '../../core/PlanGenerator';
+import { 
+  SYSTEM_PROMPTS, 
+  STEP_PROMPTS, 
+  FOLLOWUP_PROMPTS,
+  DEFAULT_MODELS,
+  TEMPERATURE_SETTINGS,
+  TOKEN_LIMITS,
+  OPERATION_NAMES,
+  executeStepTool,
+  generateFollowUpsTool
+} from '../../services/llm';
 
 /**
  * Generate a plan asynchronously
@@ -17,9 +28,9 @@ async function generatePlan(
   command: string, 
   isInitialPlan: boolean = false
 ): Promise<{ plan: Plan; agentNameAndDescription?: AgentNameAndDescription }> {
-  // Get model from environment or default
-  const model = process.env.DEFAULT_PLAN_MODEL || 'gpt-4o';
-  const provider = process.env.DEFAULT_LLM_PROVIDER || 'openai';
+  // Use centralized configuration values
+  const model = DEFAULT_MODELS.PLAN_GENERATION;
+  const provider = llm.PROVIDER_CONFIG.DEFAULT_PROVIDER;
   
   // Log the AI request for plan generation
   logOperation('ai_plan_generation', {
@@ -589,37 +600,22 @@ async function executeAiProcessingFallback(io: Server, agentId: string, planId: 
  */
 async function executeStepWithLLM(plan: any, step: any, stepNumber: number, agent: any = null): Promise<string> {
   try {
-    // Get model from environment or default
-    const model = process.env.DEFAULT_STEP_MODEL || 'gpt-4o-mini';
-    const provider = process.env.DEFAULT_LLM_PROVIDER || 'openai';
+    // Use centralized configuration
+    const model = DEFAULT_MODELS.STEP_EXECUTION;
+    const provider = llm.PROVIDER_CONFIG.DEFAULT_PROVIDER;
     
     // Build the prompt for step execution with agent context
-    const agentInfo = agent ? `
-Agent: ${agent.name}
-Description: ${agent.description}
-Capabilities: ${Array.isArray(agent.capabilities) ? agent.capabilities.join(', ') : 'General capabilities'}
-` : '';
-
-    const prompt = `
-You are executing step ${stepNumber} of a plan to respond to this command: "${plan.command}"
-
-${agentInfo}
-Plan description: ${plan.description}
-Current step: ${step.description}
-${step.details ? `Details: ${step.details}` : ''}
-
-Please execute this step and provide a detailed, thoughtful response as if you were the agent described above.
-`;
+    const prompt = STEP_PROMPTS.EXECUTION(plan, step, stepNumber, agent);
 
     // Use our abstracted LLM service
     const messages = [
-      { role: 'system' as const, content: 'You are an AI assistant that executes steps in a plan with thoroughness and attention to detail.' },
+      { role: 'system' as const, content: SYSTEM_PROMPTS.STEP_EXECUTOR },
       { role: 'user' as const, content: prompt }
     ];
     
     // Determine if we should use code execution
     const shouldUseCodeExecution = 
-      process.env.ENABLE_CODE_EXECUTION === 'true' && 
+      llm.CODE_EXECUTION_CONFIG.ENABLED && 
       llm.isCodeExecutionAvailable();
       
     // Get available MCP services for code prompt
@@ -629,7 +625,7 @@ Please execute this step and provide a detailed, thoughtful response as if you w
     
     // Update the system message with code execution context if available
     if (shouldUseCodeExecution) {
-      messages[0].content += `\nYou can write and execute code to complete this step.${mcpServicesString}`;
+      messages[0].content += STEP_PROMPTS.CODE_EXECUTION_ADDITION(mcpServicesString);
     }
     
     const response = await llm.chatCompletion(
@@ -637,12 +633,12 @@ Please execute this step and provide a detailed, thoughtful response as if you w
       {
         model,
         provider,
-        temperature: 0.7,
-        maxTokens: 1500,
+        temperature: TEMPERATURE_SETTINGS.STEP_EXECUTION,
+        maxTokens: TOKEN_LIMITS.STEP_EXECUTION,
         executionStrategy: shouldUseCodeExecution ? 'tools' : 'standard'
       },
       {
-        operation: 'execute_step',
+        operation: OPERATION_NAMES.STEP_EXECUTION,
         agentId: plan.agentId,
         planId: plan.id,
         stepNumber: String(stepNumber)
@@ -661,9 +657,9 @@ Please execute this step and provide a detailed, thoughtful response as if you w
  * Generate follow-up suggestions based on the plan
  */
 async function generateFollowUpSuggestions(plan: any, agent: any): Promise<string[]> {
-  // Get model from environment or default
-  const model = process.env.DEFAULT_FOLLOWUP_MODEL || 'gpt-4o';
-  const provider = process.env.DEFAULT_LLM_PROVIDER || 'openai';
+  // Use centralized configuration
+  const model = DEFAULT_MODELS.FOLLOWUP_GENERATION;
+  const provider = llm.PROVIDER_CONFIG.DEFAULT_PROVIDER;
   
   // Log the AI request for follow-up suggestions
   logOperation('ai_followup_generation', {
@@ -676,22 +672,12 @@ async function generateFollowUpSuggestions(plan: any, agent: any): Promise<strin
   
   try {
     // Build the prompt for follow-up suggestions
-    const prompt = `
-You've just completed a plan with the following details:
-- Command: "${plan.command}"
-- Description: "${plan.description}"
-- Agent name: ${agent.name}
-- Agent description: ${agent.description}
-
-Based on this completed task, what follow-up actions would be most valuable? Please suggest 2-4 specific follow-up actions that would extend or build upon the work that's been done.
-
-Respond with a JSON array of follow-up suggestions, where each item is a clear, actionable suggestion phrased as a question.
-`;
+    const prompt = FOLLOWUP_PROMPTS.SUGGESTIONS(plan, agent);
 
     // Extract info using our abstracted LLM service
     // Determine if we should use code execution for follow-up generation
     const shouldUseCodeExecution = 
-      process.env.ENABLE_CODE_EXECUTION === 'true' && 
+      llm.CODE_EXECUTION_CONFIG.ENABLED && 
       llm.isCodeExecutionAvailable();
     
     const parsed = await llm.extractInfo(
@@ -700,11 +686,11 @@ Respond with a JSON array of follow-up suggestions, where each item is a clear, 
       { 
         model,
         provider,
-        temperature: 0.7,
+        temperature: TEMPERATURE_SETTINGS.FOLLOWUP_GENERATION,
         ...(shouldUseCodeExecution ? { executionStrategy: 'tools' } : {})
       },
       {
-        operation: 'follow_up_generation',
+        operation: OPERATION_NAMES.FOLLOWUP_GENERATION,
         agentId: plan.agentId,
         planId: plan.id
       }

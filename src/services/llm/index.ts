@@ -19,10 +19,26 @@ import {
   getAvailableMcpServices
 } from './claude-code-execution';
 
-// Determine default providers
-const defaultChatProvider = process.env.DEFAULT_LLM_PROVIDER?.toLowerCase() || 'openai';
-const defaultEmbeddingProvider = process.env.DEFAULT_EMBEDDING_PROVIDER?.toLowerCase() || 'openai';
-const enableCodeExecution = process.env.ENABLE_CODE_EXECUTION === 'true';
+// Export all centralized modules
+export * from './prompts';
+export * from './config';
+export * from './tools';
+export * from './logging-format';
+
+// Import central configuration
+import { 
+  DEFAULT_MODELS, 
+  PROVIDER_CONFIG, 
+  TEMPERATURE_SETTINGS,
+  TOKEN_LIMITS,
+  CODE_EXECUTION_CONFIG,
+  OPERATION_NAMES
+} from './config';
+
+// Use centralized configuration instead of directly accessing environment variables
+const defaultChatProvider = PROVIDER_CONFIG.DEFAULT_PROVIDER;
+const defaultEmbeddingProvider = PROVIDER_CONFIG.DEFAULT_EMBEDDING_PROVIDER;
+const enableCodeExecution = CODE_EXECUTION_CONFIG.ENABLED;
 
 // Check Claude Code availability during startup
 let claudeCodeAvailable = false;
@@ -193,7 +209,7 @@ export async function generateEmbedding(
 export async function extractInfo<T = any>(
   text: string,
   instructions: string,
-  config: ModelConfig & { provider?: string } = { model: 'gpt-4o' },
+  config: ModelConfig & { provider?: string } = { model: DEFAULT_MODELS.EXTRACTION },
   context: RequestContext = {}
 ): Promise<T> {
   // Create messages for the extraction
@@ -211,11 +227,17 @@ export async function extractInfo<T = any>(
   // Add operation context
   const contextWithOperation = {
     ...context,
-    operation: context.operation || 'extract_info'
+    operation: context.operation || OPERATION_NAMES.EXTRACT_INFO
+  };
+  
+  // Set appropriate temperature for extraction (lower is better for factual extraction)
+  const extractionConfig = {
+    ...config,
+    temperature: config.temperature ?? TEMPERATURE_SETTINGS.EXTRACTION
   };
   
   // Use chat completion to get structured data
-  const response = await chatCompletion(messages, config, contextWithOperation);
+  const response = await chatCompletion(messages, extractionConfig, contextWithOperation);
   
   // Parse and return the result
   try {
