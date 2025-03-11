@@ -1,8 +1,8 @@
 import { v4 as uuidv4 } from 'uuid';
 import db from '../../db';
 import { logOperation } from './logging-service';
-import { Server } from 'socket.io';
 import * as llm from '../../services/llm';
+import { eventService } from '../../services/event-service';
 import { Plan } from '../../types/db'; 
 import { StepStatus, PlanStatus } from '../../core/Plan';
 import { Agent } from '../../core/Agent';
@@ -225,11 +225,11 @@ function generateFallbackPlan(agent: any, command: string): { plan: Plan; agentN
 /**
  * Execute the AI processing for a plan
  */
-async function executeAiProcessing(io: Server, agentId: string, planId: string): Promise<void> {
+async function executeAiProcessing(agentId: string, planId: string): Promise<void> {
   try {
-    // Get model from environment or default
-    const model = process.env.DEFAULT_PLAN_MODEL || 'gpt-4o';
-    const provider = process.env.DEFAULT_LLM_PROVIDER || 'openai';
+    // Get model from centralized configuration
+    const model = DEFAULT_MODELS.PLAN_EXECUTION;
+    const provider = llm.PROVIDER_CONFIG.DEFAULT_PROVIDER;
     
     // Log the operation
     await logOperation('ai_processing_started', {
@@ -274,89 +274,8 @@ async function executeAiProcessing(io: Server, agentId: string, planId: string):
       agentInstance.settings = agent.settings;
     }
     
-    // Attach socket event listeners to the agent instance
-    agentInstance.on('statusChange', async (status) => {
-      // Update agent status in the database
-      await db.agents.updateAgent(agentId, { status });
-      
-      // Broadcast status change
-      io.emit('agent:status', {
-        agentId,
-        status
-      });
-    });
-    
-    agentInstance.on('stepStatusChange', async (step) => {
-      try {
-        // The method exists in the code but wasn't exported properly
-        // Use direct query as a workaround
-        await db.pool.query(`
-          UPDATE plan_steps 
-          SET status = ?, result = ? 
-          WHERE id = ?
-        `, [step.status, step.result || null, step.id]);
-        
-        // Broadcast step status change
-        io.emit('step:status', {
-          agentId,
-          planId,
-          stepId: step.id,
-          status: step.status
-        });
-      } catch (error) {
-        console.error(`Error updating step status: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      }
-      
-      // If step completed, broadcast result
-      if (step.status === 'completed') {
-        io.emit('step:completed', {
-          agentId,
-          planId,
-          stepId: step.id,
-          status: 'completed',
-          result: step.result
-        });
-        
-        // Log step completion
-        await logOperation('step_execution_completed', {
-          agentId,
-          planId,
-          stepId: step.id,
-          resultLength: step.result ? step.result.length : 0
-        });
-      }
-    });
-    
-    // Also listen for potential name/description updates
-    agentInstance.on('metadataUpdated', async ({ name, description }) => {
-      // If name or description have changed, update in database
-      const updates: Record<string, any> = {};
-      
-      if (name !== agent.name) {
-        updates.name = name;
-      }
-      
-      if (description !== agent.description) {
-        updates.description = description;
-      }
-      
-      if (Object.keys(updates).length > 0) {
-        await db.agents.updateAgent(agentId, updates);
-        
-        // Broadcast the update
-        io.emit('agent:updated', {
-          ...agent,
-          ...updates
-        });
-        
-        // Log the metadata update
-        await logOperation('agent_metadata_updated', {
-          agentId,
-          nameUpdated: 'name' in updates,
-          descriptionUpdated: 'description' in updates
-        });
-      }
-    });
+    // Set up event handlers for agent events
+    setupAgentEventHandlers(agentInstance, agent, planId);
     
     // Set current plan - with type safety
     const planForAgent = {
@@ -427,7 +346,7 @@ async function executeAiProcessing(io: Server, agentId: string, planId: string):
     });
     
     // Broadcast plan completion with follow-ups
-    io.emit('plan:completed', {
+    eventService.emit('plan:completed', {
       agentId,
       planId,
       hasFollowUp: followUpSuggestions.length > 0,
@@ -435,6 +354,7 @@ async function executeAiProcessing(io: Server, agentId: string, planId: string):
     });
     
   } catch (error) {
+    // Log and handle error
     console.error('Error in AI processing:', error);
     
     // Log error
@@ -451,21 +371,110 @@ async function executeAiProcessing(io: Server, agentId: string, planId: string):
     await db.plans.updatePlanStatus(planId, 'failed');
     
     // Broadcast plan failure
-    io.emit('plan:failed', {
+    eventService.emit('plan:failed', {
       agentId,
       planId,
       error: error instanceof Error ? error.message : 'Unknown error'
     });
     
     // If the agent-based approach failed, fall back to the original method
-    await executeAiProcessingFallback(io, agentId, planId);
+    await executeAiProcessingFallback(agentId, planId);
   }
+}
+
+/**
+ * Set up event handlers for agent events
+ */
+function setupAgentEventHandlers(agentInstance: Agent, agent: any, planId: string): void {
+  // Handle status changes
+  agentInstance.on('statusChange', async (status) => {
+    // Update agent status in the database
+    await db.agents.updateAgent(agent.id, { status });
+    
+    // Broadcast status change
+    eventService.emit('agent:status', {
+      agentId: agent.id,
+      status
+    });
+  });
+  
+  // Handle step status changes
+  agentInstance.on('stepStatusChange', async (step) => {
+    try {
+      // Update step in database
+      await db.pool.query(`
+        UPDATE plan_steps 
+        SET status = ?, result = ? 
+        WHERE id = ?
+      `, [step.status, step.result || null, step.id]);
+      
+      // Broadcast step status change
+      eventService.emit('step:status', {
+        agentId: agent.id,
+        planId,
+        stepId: step.id,
+        status: step.status
+      });
+      
+      // If step completed, broadcast result and log
+      if (step.status === 'completed') {
+        eventService.emit('step:completed', {
+          agentId: agent.id,
+          planId,
+          stepId: step.id,
+          status: 'completed',
+          result: step.result
+        });
+        
+        // Log step completion
+        await logOperation('step_execution_completed', {
+          agentId: agent.id,
+          planId,
+          stepId: step.id,
+          resultLength: step.result ? step.result.length : 0
+        });
+      }
+    } catch (error) {
+      console.error(`Error updating step status: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  });
+  
+  // Handle metadata updates (name/description)
+  agentInstance.on('metadataUpdated', async ({ name, description }) => {
+    // If name or description have changed, update in database
+    const updates: Record<string, any> = {};
+    
+    if (name !== agent.name) {
+      updates.name = name;
+    }
+    
+    if (description !== agent.description) {
+      updates.description = description;
+    }
+    
+    if (Object.keys(updates).length > 0) {
+      await db.agents.updateAgent(agent.id, updates);
+      
+      // Broadcast the update
+      eventService.emitAgentUpdated({
+        ...agent,
+        ...updates
+      });
+      
+      // Log the metadata update
+      await logOperation('agent_metadata_updated', {
+        agentId: agent.id,
+        nameUpdated: 'name' in updates,
+        descriptionUpdated: 'description' in updates
+      });
+    }
+  });
 }
 
 /**
  * Updated implementation of executeAiProcessing to use as fallback
  */
-async function executeAiProcessingFallback(io: Server, agentId: string, planId: string): Promise<void> {
+async function executeAiProcessingFallback(agentId: string, planId: string): Promise<void> {
   try {
     // Get model from environment or default
     const model = process.env.DEFAULT_PLAN_MODEL || 'gpt-4o';
@@ -515,7 +524,7 @@ async function executeAiProcessingFallback(io: Server, agentId: string, planId: 
       `, ['in_progress', step.id]);
       
       // Broadcast step status change
-      io.emit('step:status', {
+      eventService.emit('step:status', {
         agentId,
         planId,
         stepId: step.id,
@@ -541,7 +550,7 @@ async function executeAiProcessingFallback(io: Server, agentId: string, planId: 
       });
       
       // Broadcast step completion
-      io.emit('step:completed', {
+      eventService.emit('step:completed', {
         agentId,
         planId,
         stepId: step.id,
@@ -568,7 +577,7 @@ async function executeAiProcessingFallback(io: Server, agentId: string, planId: 
         await db.agents.updateAgent(agentId, updates);
         
         // Broadcast the update
-        io.emit('agent:updated', {
+        eventService.emitAgentUpdated({
           ...agent,
           ...updates
         });

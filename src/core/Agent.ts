@@ -2,6 +2,8 @@ import EventEmitter from 'events';
 import { Plan, PlanStep } from './Plan';
 import { generatePlan } from './PlanGenerator';
 import { AgentStatus } from '../types/agent';
+import { DEFAULT_MAX_LISTENERS, AGENT_STATUS, STEP_STATUS, PLAN_STATUS } from '../config/constants';
+import { logError } from '../utils/error-utils';
 
 /**
  * Unified Agent class that replaces all specialized agent types.
@@ -20,7 +22,7 @@ export class Agent extends EventEmitter {
   constructor(id: string, name: string = 'Unnamed Agent', description: string = 'Agent awaiting configuration') {
     super();
     // Set maximum listeners to avoid memory leaks with many listeners
-    this.setMaxListeners(20);
+    this.setMaxListeners(DEFAULT_MAX_LISTENERS);
     
     this.id = id;
     this.name = name;
@@ -31,10 +33,62 @@ export class Agent extends EventEmitter {
     this.capabilities = [];
     this.settings = {};
   }
+  
+  /**
+   * Update the agent's status and emit events
+   */
+  private updateStatus(status: AgentStatus): void {
+    this.status = status;
+    this.emit('statusChange', this.status);
+  }
+  
+  /**
+   * Handle plan metadata updates
+   */
+  private updateMetadata(name?: string, description?: string): void {
+    let updated = false;
+    
+    if (name && name !== this.name) {
+      this.name = name;
+      updated = true;
+    }
+    
+    if (description && description !== this.description) {
+      this.description = description;
+      updated = true;
+    }
+    
+    if (updated) {
+      this.emit('metadataUpdated', { 
+        name: this.name, 
+        description: this.description 
+      });
+    }
+  }
+  
+  /**
+   * Validate the current plan exists
+   */
+  private validatePlanExists(): void {
+    if (!this.currentPlan) {
+      throw new Error('No plan available');
+    }
+  }
+  
+  /**
+   * Validate the agent status matches expected status
+   */
+  private validateStatus(expectedStatus: AgentStatus | AgentStatus[]): void {
+    const statusArray = Array.isArray(expectedStatus) ? expectedStatus : [expectedStatus];
+    
+    if (!statusArray.includes(this.status)) {
+      throw new Error(`Agent status is ${this.status}, expected one of: ${statusArray.join(', ')}`);
+    }
+  }
 
   async createWithCommand(command: string): Promise<{ plan: Plan, nameAndDescription: { name: string, description: string } }> {
-    this.status = AgentStatus.PLANNING;
-    this.emit('statusChange', this.status);
+    // Update status to planning
+    this.updateStatus(AgentStatus.PLANNING);
     
     try {
       // Generate a plan based on the command with real AI
@@ -43,13 +97,11 @@ export class Agent extends EventEmitter {
       
       // Update agent name and description based on plan
       if (agentNameAndDescription) {
-        this.name = agentNameAndDescription.name;
-        this.description = agentNameAndDescription.description;
-        this.emit('metadataUpdated', { name: this.name, description: this.description });
+        this.updateMetadata(agentNameAndDescription.name, agentNameAndDescription.description);
       }
       
-      this.status = AgentStatus.AWAITING_APPROVAL;
-      this.emit('statusChange', this.status);
+      // Update status to awaiting approval
+      this.updateStatus(AgentStatus.AWAITING_APPROVAL);
       this.emit('planCreated', plan);
       
       return { 
@@ -59,17 +111,18 @@ export class Agent extends EventEmitter {
           description: this.description 
         } 
       };
-    } catch (error: any) {
-      this.status = AgentStatus.ERROR;
-      this.emit('statusChange', this.status);
+    } catch (error) {
+      // Log and handle error
+      logError(error, `Agent.createWithCommand(${this.id})`);
+      this.updateStatus(AgentStatus.ERROR);
       this.emit('error', error);
       throw error;
     }
   }
 
   async receiveCommand(command: string): Promise<Plan> {
-    this.status = AgentStatus.PLANNING;
-    this.emit('statusChange', this.status);
+    // Update status to planning
+    this.updateStatus(AgentStatus.PLANNING);
     
     try {
       // Generate a plan based on the command with real AI
@@ -78,62 +131,60 @@ export class Agent extends EventEmitter {
       
       // Optionally update agent name and description based on new plan
       if (agentNameAndDescription) {
-        this.name = agentNameAndDescription.name;
-        this.description = agentNameAndDescription.description;
-        this.emit('metadataUpdated', { name: this.name, description: this.description });
+        this.updateMetadata(agentNameAndDescription.name, agentNameAndDescription.description);
       }
       
-      this.status = AgentStatus.AWAITING_APPROVAL;
-      this.emit('statusChange', this.status);
+      // Update status to awaiting approval
+      this.updateStatus(AgentStatus.AWAITING_APPROVAL);
       this.emit('planCreated', plan);
       
       return plan;
-    } catch (error: any) {
-      this.status = AgentStatus.ERROR;
-      this.emit('statusChange', this.status);
+    } catch (error) {
+      // Log and handle error
+      logError(error, `Agent.receiveCommand(${this.id})`);
+      this.updateStatus(AgentStatus.ERROR);
       this.emit('error', error);
       throw error;
     }
   }
 
   async executePlan(): Promise<void> {
-    if (!this.currentPlan) {
-      throw new Error('No plan to execute');
-    }
+    // Validate the current plan exists and status is correct
+    this.validatePlanExists();
+    this.validateStatus(AgentStatus.AWAITING_APPROVAL);
     
-    if (this.status !== AgentStatus.AWAITING_APPROVAL) {
-      throw new Error('Plan has not been approved');
-    }
-    
-    this.status = AgentStatus.EXECUTING;
-    this.emit('statusChange', this.status);
+    // Update status to executing
+    this.updateStatus(AgentStatus.EXECUTING);
     
     try {
-      for (const step of this.currentPlan.steps) {
-        step.status = 'in_progress';
+      // Execute each step in the plan
+      for (const step of this.currentPlan!.steps) {
+        // Update step status
+        step.status = STEP_STATUS.IN_PROGRESS;
         this.emit('stepStatusChange', step);
         
         // Execute the step
         const result = await this.executeStep(step);
         step.result = result;
         
-        step.status = 'completed';
+        // Update step status to completed
+        step.status = STEP_STATUS.COMPLETED;
         this.emit('stepStatusChange', step);
       }
       
       // Plan completed successfully
-      this.currentPlan.status = 'completed';
-      this.status = AgentStatus.IDLE;
-      this.emit('statusChange', this.status);
+      this.currentPlan!.status = PLAN_STATUS.COMPLETED;
+      this.updateStatus(AgentStatus.IDLE);
       this.emit('planCompleted', this.currentPlan);
       
       // Generate follow-up plan if applicable
-      if (this.currentPlan.hasFollowUp) {
+      if (this.currentPlan!.hasFollowUp) {
         this.receiveCommand('Based on the completed plan, what follow-up actions are recommended?');
       }
-    } catch (error: any) {
-      this.status = AgentStatus.ERROR;
-      this.emit('statusChange', this.status);
+    } catch (error) {
+      // Log and handle error
+      logError(error, `Agent.executePlan(${this.id})`);
+      this.updateStatus(AgentStatus.ERROR);
       this.emit('error', error);
       throw error;
     }
@@ -146,31 +197,24 @@ export class Agent extends EventEmitter {
   }
 
   approvePlan(): void {
-    if (!this.currentPlan) {
-      throw new Error('No plan to approve');
-    }
+    // Validate the current plan exists and status is correct
+    this.validatePlanExists();
+    this.validateStatus(AgentStatus.AWAITING_APPROVAL);
     
-    if (this.status !== AgentStatus.AWAITING_APPROVAL) {
-      throw new Error('Agent is not awaiting approval');
-    }
-    
-    this.currentPlan.status = 'approved';
+    // Update plan status
+    this.currentPlan!.status = PLAN_STATUS.APPROVED;
     this.emit('planApproved', this.currentPlan);
   }
 
   rejectPlan(): void {
-    if (!this.currentPlan) {
-      throw new Error('No plan to reject');
-    }
+    // Validate the current plan exists and status is correct
+    this.validatePlanExists();
+    this.validateStatus(AgentStatus.AWAITING_APPROVAL);
     
-    if (this.status !== AgentStatus.AWAITING_APPROVAL) {
-      throw new Error('Agent is not awaiting approval');
-    }
-    
-    this.currentPlan.status = 'rejected';
-    this.status = AgentStatus.IDLE;
+    // Update plan and agent status
+    this.currentPlan!.status = PLAN_STATUS.REJECTED;
+    this.updateStatus(AgentStatus.IDLE);
     this.currentPlan = null;
-    this.emit('statusChange', this.status);
     this.emit('planRejected');
   }
 
