@@ -19,7 +19,8 @@ services:
       - NODE_ENV=development
       - VITE_SERVER_URL=http://localhost:3000
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - DEFAULT_LLM_PROVIDER=openai
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - DEFAULT_LLM_PROVIDER=${DEFAULT_LLM_PROVIDER:-openai}
     volumes:
       - ./:/app
       - /app/node_modules

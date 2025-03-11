@@ -1,20 +1,38 @@
-// Mock Anthropic client for development
-// TODO: Uncomment when @anthropic-ai/sdk is properly installed
-// import Anthropic from '@anthropic-ai/sdk';
+// Import Anthropic client or use mock if the SDK isn't available
 import { LLMMessage, LLMChatCompletionResponse, ModelConfig, LLMEmbeddingResponse, RequestContext } from './types';
 import { logLLMRequest } from './logger';
 import { calculateCost } from './pricing';
 
-// Create a mock client for development
-const client = {
-  messages: {
-    create: async (_options: any) => ({
-      content: [{ text: "This is a mock response from Claude" }],
-      usage: { input_tokens: 100, output_tokens: 50 },
-      stop_reason: "end_turn"
-    })
-  }
-};
+// Check for API key and log warning if missing
+if (!process.env.ANTHROPIC_API_KEY) {
+  console.warn('WARNING: ANTHROPIC_API_KEY environment variable is not set. Anthropic API calls will use mock responses.');
+}
+
+// Try to import @anthropic-ai/sdk if available, or use a mock client
+let client: any;
+
+try {
+  // Try to dynamically import Anthropic SDK
+  // This is done at runtime to avoid build errors if the package isn't installed
+  const Anthropic = require('@anthropic-ai/sdk');
+  client = new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY
+  });
+  console.log('Anthropic SDK loaded successfully');
+} catch (error) {
+  console.warn('Failed to load @anthropic-ai/sdk, using mock client instead:', error instanceof Error ? error.message : 'Unknown error');
+  
+  // Create a mock client for development
+  client = {
+    messages: {
+      create: async (_options: any) => ({
+        content: [{ text: "This is a mock response from Claude" }],
+        usage: { input_tokens: 100, output_tokens: 50 },
+        stop_reason: "end_turn"
+      })
+    }
+  };
+}
 
 /**
  * Generate a chat completion using Anthropic Claude
