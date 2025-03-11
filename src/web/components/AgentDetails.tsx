@@ -47,7 +47,7 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
     
     fetchAgentDetails();
     
-    // Set up socket event listeners
+    // Set up socket event listeners with optimized updates
     socket.on('agent:updated', (updatedAgent) => {
       if (updatedAgent.id === agentId) {
         setAgent((prevAgent) => prevAgent ? {
@@ -59,22 +59,28 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
     
     socket.on('plan:created', (plan) => {
       if (plan.agentId === agentId) {
-        // Refresh agent to get the current plan
-        fetchAgentDetails();
+        // Update current plan directly instead of full refresh
+        setCurrentPlan(plan);
+        // Update agent status if needed
+        setAgent(prev => prev ? { ...prev, status: AgentStatus.AWAITING_APPROVAL } : prev);
       }
     });
     
     socket.on('plan:approved', (data) => {
       if (data.agentId === agentId) {
-        // Refresh agent to get the updated plan
-        fetchAgentDetails();
+        // Update plan status directly
+        setCurrentPlan(prev => prev ? { ...prev, status: 'approved' } : null);
+        // Update agent status
+        setAgent(prev => prev ? { ...prev, status: AgentStatus.EXECUTING } : prev);
       }
     });
     
     socket.on('plan:rejected', (data) => {
       if (data.agentId === agentId) {
-        // Refresh agent to get the updated status
-        fetchAgentDetails();
+        // Just clear the current plan
+        setCurrentPlan(null);
+        // Update agent status
+        setAgent(prev => prev ? { ...prev, status: AgentStatus.IDLE } : prev);
       }
     });
     
@@ -125,8 +131,8 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
     
     fetchCurrentPlan();
     
-    // Setup interval to refresh plan status
-    const intervalId = setInterval(fetchCurrentPlan, 5000);
+    // Setup interval to refresh plan status with reduced frequency
+    const intervalId = setInterval(fetchCurrentPlan, 15000);
     
     // Cleanup function to handle both interval and fetch cancellation
     return () => {
@@ -164,15 +170,11 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
       // Clear command input
       setCommand('');
       
-      // Fetch updated plan
-      const planResponse = await fetch(`/api/agents/${agentId}/current-plan`);
-      if (planResponse.ok) {
-        const planData = await planResponse.json();
-        setCurrentPlan(planData.hasPlan ? planData : null);
-      }
-      
-      // Switch to plan tab
+      // Switch to plan tab (rest of updates will come via socket)
       setActiveTab('plan');
+      
+      // Optimistic status update (the real status will come via socket)
+      setAgent(prev => prev ? { ...prev, status: AgentStatus.PLANNING } : prev);
     } catch (err) {
       console.error('Error sending command:', err);
       setError(err instanceof Error ? err.message : 'Failed to send command');
@@ -194,12 +196,9 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
         throw new Error(errorData.error || 'Failed to approve plan');
       }
       
-      // Refresh plan
-      const planResponse = await fetch(`/api/agents/${agentId}/current-plan`);
-      if (planResponse.ok) {
-        const planData = await planResponse.json();
-        setCurrentPlan(planData.hasPlan ? planData : null);
-      }
+      // Optimistic update - the socket will provide real data if needed
+      setCurrentPlan(prev => prev ? { ...prev, status: 'approved' } : null);
+      setAgent(prev => prev ? { ...prev, status: AgentStatus.EXECUTING } : prev);
     } catch (err) {
       console.error('Error approving plan:', err);
       setError(err instanceof Error ? err.message : 'Failed to approve plan');
@@ -219,8 +218,9 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
         throw new Error(errorData.error || 'Failed to reject plan');
       }
       
-      // Refresh plan
+      // Optimistic update
       setCurrentPlan(null);
+      setAgent(prev => prev ? { ...prev, status: AgentStatus.IDLE } : prev);
     } catch (err) {
       console.error('Error rejecting plan:', err);
       setError(err instanceof Error ? err.message : 'Failed to reject plan');
