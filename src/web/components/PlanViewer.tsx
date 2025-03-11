@@ -94,8 +94,8 @@ const PlanViewer: React.FC<PlanViewerProps> = ({ plan }) => {
       <div className="plan-header">
         <div className="plan-status-container">
           <span className="plan-id">Plan #{plan.planId ? plan.planId.substring(0, 8) : 'Unknown'}</span>
-          <span className={`plan-status ${getPlanStatusClass(plan.status)}`}>
-            {plan.status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+          <span className={`plan-status ${getPlanStatusClass(plan.status || '')}`}>
+            {(plan.status || 'unknown').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
           </span>
         </div>
         
@@ -120,12 +120,12 @@ const PlanViewer: React.FC<PlanViewerProps> = ({ plan }) => {
         
         <h3>Steps</h3>
         <div className="plan-steps">
-          {plan.steps.map((step) => (
-            <div key={step.id} className={`plan-step step-${step.status}`}>
+          {(plan.steps || []).map((step) => (
+            <div key={step.id} className={`plan-step step-${step.status || 'unknown'}`}>
               <div className="step-header">
-                <span className="step-icon">{getStepStatusIcon(step.status)}</span>
+                <span className="step-icon">{getStepStatusIcon(step.status || '')}</span>
                 <span className="step-description">{step.description}</span>
-                <span className="step-status">{step.status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
+                <span className="step-status">{(step.status || 'unknown').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
                 <span className="step-time">Est: {formatDuration(step.estimatedDuration)}</span>
               </div>
               
