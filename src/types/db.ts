@@ -24,6 +24,7 @@ export interface PlanRowData extends RowDataPacket {
 // Define interfaces for plan and step structures
 export interface Plan {
   id: string;
+  planId?: string; // Alias for id used in some parts of the UI
   agentId: string;
   command: string;
   description: string;
