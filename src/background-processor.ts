@@ -2,8 +2,9 @@ import db from './db';
 import { logOperation } from './api/services/logging-service';
 import { executeAiProcessing } from './api/services/plan-service';
 import { Server } from 'socket.io';
-import { AgentStatus, AgentData } from './types/agent';
+import { AgentStatus } from './types/agent';
 import { RowDataPacket } from 'mysql2';
+import { Plan } from './types/db';
 
 /**
  * Background processor that checks for agents with plans awaiting approval
@@ -118,7 +119,7 @@ export class BackgroundProcessor {
       
       for (const agent of agents) {
         // Get the latest plan for this agent
-        const plan = await db.plans.getCurrentPlanForAgent(agent.id);
+        const plan = await db.plans.getCurrentPlanForAgent(agent.id as string) as Plan | null;
         if (!plan) continue;
         
         // Converting to any for safety since RowDataPacket doesn't have the expected fields
@@ -136,7 +137,7 @@ export class BackgroundProcessor {
           });
           
           // Execute the plan in background
-          executeAiProcessing(this.io, agent.id, planData.id);
+          executeAiProcessing(this.io, agent.id as string, planData.id);
         }
       }
     } catch (error) {
@@ -164,7 +165,7 @@ export class BackgroundProcessor {
         // Emit a socket event with all agents awaiting approval
         const awaitingApprovalData = await Promise.all(
           agents.map(async (agent) => {
-            const plan = await db.plans.getCurrentPlanForAgent(agent.id);
+            const plan = await db.plans.getCurrentPlanForAgent(agent.id as string) as Plan | null;
             return {
               agent,
               plan: plan || null

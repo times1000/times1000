@@ -200,6 +200,47 @@ const agents = {
       console.error(`Error deleting agent ${id}:`, error);
       return false;
     }
+  },
+  
+  // Get agents by status
+  async getAgentsByStatus(status: string) {
+    try {
+      const [rows] = await pool.query<RowDataPacket[]>(`
+        SELECT 
+          id, name, description, status, 
+          capabilities, personality_profile AS personalityProfile,
+          settings, created_at AS createdAt, 
+          last_active AS updatedAt
+        FROM agents
+        WHERE status = ?
+      `, [status]);
+      
+      // Parse capabilities and settings
+      return rows.map(agent => {
+        // Parse capabilities
+        if (agent.capabilities && typeof agent.capabilities === 'string') {
+          try {
+            agent.capabilities = JSON.parse(agent.capabilities);
+          } catch (e) {
+            agent.capabilities = [];
+          }
+        }
+        
+        // Parse settings
+        if (agent.settings && typeof agent.settings === 'string') {
+          try {
+            agent.settings = JSON.parse(agent.settings);
+          } catch (e) {
+            agent.settings = {};
+          }
+        }
+        
+        return agent;
+      });
+    } catch (error) {
+      console.error(`Error fetching agents with status ${status}:`, error);
+      return [];
+    }
   }
 };
 
