@@ -1,8 +1,21 @@
 import db from '../../db';
 import { v4 as uuidv4 } from 'uuid';
 
-interface LogDetails {
+// Common interfaces for both log types
+interface PaginationResult {
+  logs: any[];
+  pagination: {
+    page: number;
+    limit: number;
+    totalItems: number;
+    totalPages: number;
+  };
+}
+
+// LLM log specific interfaces
+interface LLMLogDetails {
   model?: string;
+  provider?: string;
   prompt?: string;
   response?: string | null;
   tokensPrompt?: number;
@@ -16,32 +29,41 @@ interface LogDetails {
   [key: string]: any;
 }
 
-interface LogEntry extends LogDetails {
+interface LLMLogEntry extends LLMLogDetails {
   id: string;
   timestamp: string;
   operation: string;
   loggingError?: string;
 }
 
-interface PaginationResult {
-  logs: any[];
-  pagination: {
-    page: number;
-    limit: number;
-    totalItems: number;
-    totalPages: number;
-  };
+// System log specific interfaces
+interface SystemLogDetails {
+  source: string;
+  message?: string;
+  details?: string;
+  level?: 'info' | 'warning' | 'error' | 'debug';
+  durationMs?: number;
+  agentId?: string | null;
+  planId?: string | null;
+  [key: string]: any;
+}
+
+interface SystemLogEntry extends SystemLogDetails {
+  id: string;
+  timestamp: string;
+  operation: string;
+  loggingError?: string;
 }
 
 /**
  * Log LLM API operation to database
  */
-async function logOperation(operation: string, details: LogDetails): Promise<LogEntry> {
+async function logLLMOperation(operation: string, details: LLMLogDetails): Promise<LLMLogEntry> {
   try {
     const timestamp = new Date().toISOString();
     
     // Create log entry
-    const logEntry: LogEntry = {
+    const logEntry: LLMLogEntry = {
       id: uuidv4(),
       timestamp,
       operation,
@@ -49,10 +71,11 @@ async function logOperation(operation: string, details: LogDetails): Promise<Log
     };
     
     // Still log to console for debugging
-    console.log(`[AI Operation Log] ${timestamp} - ${operation}:`, JSON.stringify({
+    console.log(`[LLM Operation Log] ${timestamp} - ${operation}:`, JSON.stringify({
       id: logEntry.id,
       operation,
       model: details.model,
+      provider: details.provider,
       tokensPrompt: details.tokensPrompt,
       tokensCompletion: details.tokensCompletion,
       costUsd: details.costUsd,
@@ -105,19 +128,12 @@ async function logOperation(operation: string, details: LogDetails): Promise<Log
       }
     }
     
-    // Log more details before DB save
-    console.log(`Saving log ${logEntry.id} to database with prompt length: ${promptToSave.length}, response length: ${responseToSave ? responseToSave.length : 0}`);
-    
-    // For debugging - log first 100 chars of prompt
-    if (promptToSave) {
-      console.log(`Prompt preview: ${promptToSave.substring(0, 100)}...`);
-    }
-    
     try {
-      await db.llmLogs.createLog({
+      await db.logs.llm.createLog({
         id: logEntry.id,
         operation,
         model: details.model || 'unknown',
+        provider: details.provider || 'unknown',
         prompt: promptToSave,
         response: responseToSave,
         tokensPrompt: details.tokensPrompt || 0,
@@ -129,17 +145,16 @@ async function logOperation(operation: string, details: LogDetails): Promise<Log
         agentId: details.agentId || null,
         planId: details.planId || null
       });
-      console.log(`Successfully saved log ${logEntry.id} to database`);
     } catch (dbError: any) {
-      console.error(`Database error saving log ${logEntry.id}:`, dbError);
+      console.error(`Database error saving LLM log ${logEntry.id}:`, dbError);
       
       // Try one more time with minimal data
       try {
-        console.log(`Retrying log ${logEntry.id} save with minimal data`);
-        await db.llmLogs.createLog({
+        await db.logs.llm.createLog({
           id: logEntry.id,
           operation,
           model: details.model || 'unknown',
+          provider: details.provider || 'unknown',
           prompt: 'Log data too large - see console logs',
           response: null,
           tokensPrompt: details.tokensPrompt || 0,
@@ -151,15 +166,14 @@ async function logOperation(operation: string, details: LogDetails): Promise<Log
           agentId: details.agentId || null,
           planId: details.planId || null
         });
-        console.log(`Successfully saved minimal log ${logEntry.id} to database`);
       } catch (retryError) {
-        console.error(`Even minimal log ${logEntry.id} save failed:`, retryError);
+        console.error(`Even minimal LLM log ${logEntry.id} save failed:`, retryError);
       }
     }
     
     return logEntry;
   } catch (error: any) {
-    console.error('Error in logging operation:', error);
+    console.error('Error in logging LLM operation:', error);
     // Still return something even if db save fails
     return {
       id: uuidv4(),
@@ -172,13 +186,69 @@ async function logOperation(operation: string, details: LogDetails): Promise<Log
 }
 
 /**
- * Get all LLM API logs with pagination
+ * Log system operation to database
  */
-async function getLogs(page = 1, limit = 20): Promise<PaginationResult> {
+async function logSystemOperation(operation: string, details: SystemLogDetails): Promise<SystemLogEntry> {
   try {
-    return await db.llmLogs.getLogs(page, limit);
+    const timestamp = new Date().toISOString();
+    
+    // Create log entry
+    const logEntry: SystemLogEntry = {
+      id: uuidv4(),
+      timestamp,
+      operation,
+      ...details
+    };
+    
+    // Log to console for debugging
+    console.log(`[System Log] ${timestamp} - ${details.source} - ${operation}:`, details.message);
+    
+    try {
+      await db.logs.system.createLog({
+        id: logEntry.id,
+        source: details.source,
+        operation,
+        message: details.message || '',
+        details: details.details || null,
+        level: details.level || 'info',
+        durationMs: details.durationMs || 0,
+        agentId: details.agentId || null,
+        planId: details.planId || null
+      });
+    } catch (dbError: any) {
+      console.error(`Database error saving system log ${logEntry.id}:`, dbError);
+    }
+    
+    return logEntry;
+  } catch (error: any) {
+    console.error('Error in logging system operation:', error);
+    // Still return something even if db save fails
+    return {
+      id: uuidv4(),
+      timestamp: new Date().toISOString(),
+      operation,
+      ...details,
+      loggingError: error.message
+    };
+  }
+}
+
+/**
+ * Legacy function for backward compatibility
+ * Logs to the LLM table
+ */
+async function logOperation(operation: string, details: LLMLogDetails): Promise<LLMLogEntry> {
+  return logLLMOperation(operation, details);
+}
+
+/**
+ * Get all LLM logs with pagination
+ */
+async function getLLMLogs(page = 1, limit = 20): Promise<PaginationResult> {
+  try {
+    return await db.logs.llm.getLogs(page, limit);
   } catch (error) {
-    console.error('Error fetching logs:', error);
+    console.error('Error fetching LLM logs:', error);
     return {
       logs: [],
       pagination: { page, limit, totalItems: 0, totalPages: 0 }
@@ -187,13 +257,13 @@ async function getLogs(page = 1, limit = 20): Promise<PaginationResult> {
 }
 
 /**
- * Get logs for a specific agent
+ * Get all system logs with pagination
  */
-async function getLogsByAgentId(agentId: string, page = 1, limit = 20): Promise<PaginationResult> {
+async function getSystemLogs(page = 1, limit = 20): Promise<PaginationResult> {
   try {
-    return await db.llmLogs.getLogsByAgentId(agentId, page, limit);
+    return await db.logs.system.getLogs(page, limit);
   } catch (error) {
-    console.error(`Error fetching logs for agent ${agentId}:`, error);
+    console.error('Error fetching system logs:', error);
     return {
       logs: [],
       pagination: { page, limit, totalItems: 0, totalPages: 0 }
@@ -201,7 +271,57 @@ async function getLogsByAgentId(agentId: string, page = 1, limit = 20): Promise<
   }
 }
 
+/**
+ * Get LLM logs for a specific agent
+ */
+async function getLLMLogsByAgentId(agentId: string, page = 1, limit = 20): Promise<PaginationResult> {
+  try {
+    return await db.logs.llm.getLogsByAgentId(agentId, page, limit);
+  } catch (error) {
+    console.error(`Error fetching LLM logs for agent ${agentId}:`, error);
+    return {
+      logs: [],
+      pagination: { page, limit, totalItems: 0, totalPages: 0 }
+    };
+  }
+}
+
+/**
+ * Get system logs for a specific agent
+ */
+async function getSystemLogsByAgentId(agentId: string, page = 1, limit = 20): Promise<PaginationResult> {
+  try {
+    return await db.logs.system.getLogsByAgentId(agentId, page, limit);
+  } catch (error) {
+    console.error(`Error fetching system logs for agent ${agentId}:`, error);
+    return {
+      logs: [],
+      pagination: { page, limit, totalItems: 0, totalPages: 0 }
+    };
+  }
+}
+
+/**
+ * Legacy functions for backward compatibility
+ */
+async function getLogs(page = 1, limit = 20): Promise<PaginationResult> {
+  return getLLMLogs(page, limit);
+}
+
+async function getLogsByAgentId(agentId: string, page = 1, limit = 20): Promise<PaginationResult> {
+  return getLLMLogsByAgentId(agentId, page, limit);
+}
+
 export {
+  // New functions
+  logLLMOperation,
+  logSystemOperation,
+  getLLMLogs,
+  getSystemLogs,
+  getLLMLogsByAgentId,
+  getSystemLogsByAgentId,
+  
+  // Legacy functions for backward compatibility
   logOperation,
   getLogs,
   getLogsByAgentId

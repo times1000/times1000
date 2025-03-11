@@ -3,6 +3,7 @@ import db from '../../db';
 db.testConnection();
 import { v4 as uuidv4 } from 'uuid';
 import { LLMMessage, TokenUsage, RequestContext, ToolUsage } from './types';
+import { logLLMOperation, logSystemOperation } from '../../api/services/logging-service';
 
 /**
  * LLM Request Logger - Logs all LLM API calls to database
@@ -35,17 +36,13 @@ export async function logLLMRequest({
   toolUsage?: ToolUsage;
 }): Promise<void> {
   try {
-    const id = uuidv4();
-    const timestamp = new Date().toISOString();
-    
     // Prepare prompt for storage
     const promptString = typeof prompt === 'string' 
       ? prompt 
       : JSON.stringify(prompt);
     
     // Log to console for debugging (minimal details)
-    console.log(`[LLM ${provider}] ${timestamp} - ${operation}:`, {
-      id,
+    const logData = {
       model,
       provider,
       tokens: {
@@ -61,93 +58,70 @@ export async function logLLMRequest({
         toolCalls: toolUsage.toolCalls,
         toolRevenue: toolUsage.toolRevenue
       } : {})
+    };
+    
+    // Check if agent exists before attempting to log
+    // This avoids foreign key constraint errors when the agent is not yet created
+    let safeAgentId = null;
+    if (context.agentId) {
+      try {
+        const agent = await db.agents.getAgentById(context.agentId);
+        if (agent) {
+          safeAgentId = context.agentId;
+        }
+      } catch (err) {
+        console.log(`Agent ${context.agentId} not found in database, logging without agentId reference`);
+      }
+    }
+    
+    // Log LLM operation
+    await logLLMOperation(operation, {
+      model,
+      provider,
+      prompt: promptString,
+      response,
+      tokensPrompt: tokenUsage.promptTokens,
+      tokensCompletion: tokenUsage.completionTokens,
+      costUsd,
+      durationMs,
+      status,
+      error,
+      agentId: safeAgentId,
+      planId: context.planId || null
     });
     
-    // Ensure text lengths are appropriate for database
-    const maxTextLength = 65000; // Safe limit for MySQL LONGTEXT
-    
-    // Truncate prompt if needed
-    const promptToSave = promptString.length > maxTextLength
-      ? promptString.substring(0, maxTextLength) + '...(truncated)'
-      : promptString;
-    
-    // Handle response - ensure it's a string or null
-    let responseToSave = null;
-    if (response) {
-      responseToSave = response.length > maxTextLength
-        ? response.substring(0, maxTextLength) + '...(truncated)'
-        : response;
-    }
-    
-    // Save to database
-    try {
-      // Check if agent exists before attempting to log
-      // This avoids foreign key constraint errors when the agent is not yet created
-      let safeAgentId = null;
-      if (context.agentId) {
-        try {
-          const agent = await db.agents.getAgentById(context.agentId);
-          if (agent) {
-            safeAgentId = context.agentId;
-          }
-        } catch (err) {
-          console.log(`Agent ${context.agentId} not found in database, logging without agentId reference`);
-        }
-      }
-      
-      await db.llmLogs.createLog({
-        id,
-        operation,
+    // Also log a system entry for the operation
+    await logSystemOperation('llm_request', {
+      source: 'llm_service',
+      message: `${provider} ${model} ${operation}`,
+      details: JSON.stringify({
         model,
-        prompt: promptToSave,
-        response: responseToSave,
-        tokensPrompt: tokenUsage.promptTokens,
-        tokensCompletion: tokenUsage.completionTokens,
+        provider,
+        operation,
+        tokenUsage,
         costUsd,
-        durationMs,
         status,
-        errorMessage: error,
-        agentId: safeAgentId,
-        planId: context.planId || null
-      });
-    } catch (dbError: any) {
-      console.error('Error saving LLM log to database:', dbError);
-      
-      // Try one more time with minimal data
-      try {
-        // Even for fallback, we need to be safe about foreign keys
-        let safeAgentId = null;
-        if (context.agentId) {
-          try {
-            const agent = await db.agents.getAgentById(context.agentId);
-            if (agent) {
-              safeAgentId = context.agentId;
-            }
-          } catch (err) {
-            // Silently continue without the agent ID
-          }
-        }
-        
-        await db.llmLogs.createLog({
-          id,
-          operation,
-          model,
-          prompt: `${provider} ${model} request (too large for DB)`,
-          response: null,
-          tokensPrompt: tokenUsage.promptTokens,
-          tokensCompletion: tokenUsage.completionTokens,
-          costUsd,
-          durationMs,
-          status,
-          errorMessage: `Original save failed: ${dbError.message}`,
-          agentId: safeAgentId,
-          planId: context.planId || null
-        });
-      } catch (retryError) {
-        console.error('Failed to save even minimal LLM log:', retryError);
-      }
-    }
+        ...(toolUsage ? { toolUsage } : {})
+      }),
+      level: error ? 'error' : 'info',
+      durationMs,
+      agentId: safeAgentId,
+      planId: context.planId || null
+    });
   } catch (error: any) {
     console.error('Error in LLM logging:', error);
+    
+    // Try to log the error as a system log
+    try {
+      await logSystemOperation('llm_log_error', {
+        source: 'llm_service',
+        message: `Error logging LLM ${provider} ${model} operation: ${error.message}`,
+        level: 'error',
+        agentId: context.agentId || null,
+        planId: context.planId || null
+      });
+    } catch (secondaryError) {
+      console.error('Failed to log LLM logging error:', secondaryError);
+    }
   }
 }

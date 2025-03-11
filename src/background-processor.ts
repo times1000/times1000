@@ -1,5 +1,5 @@
 import db from './db';
-import { logOperation } from './api/services/logging-service';
+import { logOperation, logSystemOperation } from './api/services/logging-service';
 import { executeAiProcessing, generatePlan } from './api/services/plan-service';
 import { Server } from 'socket.io';
 import { AgentStatus, PlanGenerationQueueItem } from './types/agent';
@@ -24,8 +24,11 @@ export class BackgroundProcessor {
     // Add error handler for Socket.IO
     this.io.on('error', (error) => {
       console.error('Socket.IO error in background processor:', error);
-      logOperation('background_processor_socket_error', {
-        error: error instanceof Error ? error.message : 'Unknown error'
+      logSystemOperation('socket_error', {
+        source: 'background_processor',
+        message: 'Socket.IO error in background processor',
+        details: JSON.stringify({error: error instanceof Error ? error.message : 'Unknown error'}),
+        level: 'error'
       });
     });
   }
@@ -58,11 +61,16 @@ export class BackgroundProcessor {
       this.processPendingTasks();
     }, this.pollInterval);
 
-    logOperation('background_processor_started', {
-      pollInterval: this.pollInterval,
-      hasOpenAIKey,
-      hasAnthropicKey,
-      defaultProvider: process.env.DEFAULT_LLM_PROVIDER || 'openai'
+    logSystemOperation('background_processor_started', {
+      source: 'background_processor',
+      message: 'Background processor started',
+      details: JSON.stringify({
+        pollInterval: this.pollInterval,
+        hasOpenAIKey,
+        hasAnthropicKey,
+        defaultProvider: process.env.DEFAULT_LLM_PROVIDER || 'openai'
+      }),
+      level: 'info'
     });
   }
 
@@ -83,7 +91,11 @@ export class BackgroundProcessor {
       this.intervalId = null;
     }
 
-    logOperation('background_processor_stopped', {});
+    logSystemOperation('background_processor_stopped', {
+      source: 'background_processor',
+      message: 'Background processor stopped',
+      level: 'info'
+    });
   }
 
   /**
@@ -101,8 +113,14 @@ export class BackgroundProcessor {
       await this.processPlanGenerationQueue();
     } catch (error) {
       console.error('Error in background processor:', error);
-      logOperation('background_processor_error', {
-        error: error instanceof Error ? error.message : 'Unknown error'
+      logSystemOperation('background_processor_error', {
+        source: 'background_processor',
+        message: 'Error in background processor',
+        details: JSON.stringify({
+          error: error instanceof Error ? error.message : 'Unknown error',
+          stack: error instanceof Error ? error.stack : 'No stack trace'
+        }),
+        level: 'error'
       });
     }
   }
@@ -120,11 +138,18 @@ export class BackgroundProcessor {
     
     console.log(`Queued plan generation for agent ${item.agentId} with request ID ${requestId}`);
     
-    // Log the operation
-    logOperation('plan_generation_queued', {
-      agentId: item.agentId,
-      requestId,
-      isInitialPlan: item.isInitialPlan
+    // Log the operation with the new system logger
+    logSystemOperation('plan_generation_queued', {
+      source: 'plan_generator',
+      message: `Queued plan generation for agent ${item.agentId}`,
+      details: JSON.stringify({
+        agentId: item.agentId,
+        requestId,
+        isInitialPlan: item.isInitialPlan,
+        command: item.command.substring(0, 100) + (item.command.length > 100 ? '...' : '')
+      }),
+      level: 'info',
+      agentId: item.agentId
     });
     
     return requestId;

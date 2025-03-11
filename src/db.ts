@@ -411,131 +411,256 @@ const plans = {
   }
 };
 
-// LLM API logs repository
-const llmLogs = {
-  // Create a new log entry
-  async createLog(logData: any) {
-    try {
-      const id = logData.id || uuidv4();
-      
-      await pool.query<ResultSetHeader>(`
-        INSERT INTO llm_api_logs (
-          id, agent_id, plan_id, operation, model,
-          prompt, response, tokens_prompt, tokens_completion,
-          cost_usd, duration_ms, status, error_message
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [
-        id,
-        logData.agentId || null,
-        logData.planId || null,
-        logData.operation,
-        logData.model,
-        logData.prompt,
-        logData.response || null,
-        logData.tokensPrompt || 0,
-        logData.tokensCompletion || 0,
-        logData.costUsd || null,
-        logData.durationMs || 0,
-        logData.status,
-        logData.errorMessage || null
-      ]);
-      
-      return { id, ...logData };
-    } catch (error) {
-      console.error('Error creating LLM API log:', error);
-      throw error;
+// Logs repository
+const logs = {
+  // LLM Logs functions
+  llm: {
+    // Create a new LLM log entry
+    async createLog(logData: any) {
+      try {
+        const id = logData.id || uuidv4();
+        
+        await pool.query<ResultSetHeader>(`
+          INSERT INTO llm_logs (
+            id, agent_id, plan_id, operation, model, provider,
+            prompt, response, tokens_prompt, tokens_completion,
+            cost_usd, duration_ms, status, error_message, log_type
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          id,
+          logData.agentId || null,
+          logData.planId || null,
+          logData.operation,
+          logData.model,
+          logData.provider || 'unknown',
+          logData.prompt,
+          logData.response || null,
+          logData.tokensPrompt || 0,
+          logData.tokensCompletion || 0,
+          logData.costUsd || null,
+          logData.durationMs || 0,
+          logData.status,
+          logData.errorMessage || null,
+          logData.logType || 'llm_api'
+        ]);
+        
+        return { id, ...logData };
+      } catch (error) {
+        console.error('Error creating LLM log:', error);
+        throw error;
+      }
+    },
+    
+    // Get all LLM logs with pagination
+    async getLogs(page = 1, limit = 20) {
+      try {
+        const offset = (page - 1) * limit;
+        
+        const [rows] = await pool.query<RowDataPacket[]>(`
+          SELECT 
+            id, agent_id AS agentId, plan_id AS planId,
+            operation, model, provider, prompt, response,
+            tokens_prompt AS tokensPrompt, tokens_completion AS tokensCompletion,
+            cost_usd AS costUsd, duration_ms AS durationMs, status, error_message AS errorMessage,
+            created_at AS createdAt, log_type AS logType
+          FROM llm_logs
+          ORDER BY created_at DESC
+          LIMIT ? OFFSET ?
+        `, [limit, offset]);
+        
+        // Get total count for pagination
+        const [countResult] = await pool.query<RowDataPacket[]>('SELECT COUNT(*) as total FROM llm_logs');
+        const totalCount = countResult[0].total;
+        
+        return {
+          logs: rows,
+          pagination: {
+            page,
+            limit,
+            totalItems: totalCount,
+            totalPages: Math.ceil(totalCount / limit)
+          }
+        };
+      } catch (error) {
+        console.error('Error fetching LLM logs:', error);
+        return {
+          logs: [],
+          pagination: {
+            page,
+            limit,
+            totalItems: 0,
+            totalPages: 0
+          }
+        };
+      }
+    },
+    
+    // Get LLM logs for a specific agent
+    async getLogsByAgentId(agentId: string, page = 1, limit = 20) {
+      try {
+        const offset = (page - 1) * limit;
+        
+        const [rows] = await pool.query<RowDataPacket[]>(`
+          SELECT 
+            id, agent_id AS agentId, plan_id AS planId,
+            operation, model, provider, prompt, response,
+            tokens_prompt AS tokensPrompt, tokens_completion AS tokensCompletion,
+            cost_usd AS costUsd, duration_ms AS durationMs, status, error_message AS errorMessage,
+            created_at AS createdAt, log_type AS logType
+          FROM llm_logs
+          WHERE agent_id = ?
+          ORDER BY created_at DESC
+          LIMIT ? OFFSET ?
+        `, [agentId, limit, offset]);
+        
+        // Get total count for pagination
+        const [countResult] = await pool.query<RowDataPacket[]>(
+          'SELECT COUNT(*) as total FROM llm_logs WHERE agent_id = ?',
+          [agentId]
+        );
+        const totalCount = countResult[0].total;
+        
+        return {
+          logs: rows,
+          pagination: {
+            page,
+            limit,
+            totalItems: totalCount,
+            totalPages: Math.ceil(totalCount / limit)
+          }
+        };
+      } catch (error) {
+        console.error(`Error fetching LLM logs for agent ${agentId}:`, error);
+        return {
+          logs: [],
+          pagination: {
+            page,
+            limit,
+            totalItems: 0,
+            totalPages: 0
+          }
+        };
+      }
     }
   },
   
-  // Get all logs with pagination
-  async getLogs(page = 1, limit = 20) {
-    try {
-      const offset = (page - 1) * limit;
-      
-      const [rows] = await pool.query<RowDataPacket[]>(`
-        SELECT 
-          id, agent_id AS agentId, plan_id AS planId,
-          operation, model, prompt, response,
-          tokens_prompt AS tokensPrompt, tokens_completion AS tokensCompletion,
-          cost_usd AS costUsd, duration_ms AS durationMs, status, error_message AS errorMessage,
-          created_at AS createdAt
-        FROM llm_api_logs
-        ORDER BY created_at DESC
-        LIMIT ? OFFSET ?
-      `, [limit, offset]);
-      
-      // Get total count for pagination
-      const [countResult] = await pool.query<RowDataPacket[]>('SELECT COUNT(*) as total FROM llm_api_logs');
-      const totalCount = countResult[0].total;
-      
-      return {
-        logs: rows,
-        pagination: {
-          page,
-          limit,
-          totalItems: totalCount,
-          totalPages: Math.ceil(totalCount / limit)
-        }
-      };
-    } catch (error) {
-      console.error('Error fetching LLM API logs:', error);
-      return {
-        logs: [],
-        pagination: {
-          page,
-          limit,
-          totalItems: 0,
-          totalPages: 0
-        }
-      };
-    }
-  },
-  
-  // Get logs for a specific agent
-  async getLogsByAgentId(agentId: string, page = 1, limit = 20) {
-    try {
-      const offset = (page - 1) * limit;
-      
-      const [rows] = await pool.query<RowDataPacket[]>(`
-        SELECT 
-          id, agent_id AS agentId, plan_id AS planId,
-          operation, model, prompt, response,
-          tokens_prompt AS tokensPrompt, tokens_completion AS tokensCompletion,
-          cost_usd AS costUsd, duration_ms AS durationMs, status, error_message AS errorMessage,
-          created_at AS createdAt
-        FROM llm_api_logs
-        WHERE agent_id = ?
-        ORDER BY created_at DESC
-        LIMIT ? OFFSET ?
-      `, [agentId, limit, offset]);
-      
-      // Get total count for pagination
-      const [countResult] = await pool.query<RowDataPacket[]>(
-        'SELECT COUNT(*) as total FROM llm_api_logs WHERE agent_id = ?',
-        [agentId]
-      );
-      const totalCount = countResult[0].total;
-      
-      return {
-        logs: rows,
-        pagination: {
-          page,
-          limit,
-          totalItems: totalCount,
-          totalPages: Math.ceil(totalCount / limit)
-        }
-      };
-    } catch (error) {
-      console.error(`Error fetching LLM API logs for agent ${agentId}:`, error);
-      return {
-        logs: [],
-        pagination: {
-          page,
-          limit,
-          totalItems: 0,
-          totalPages: 0
-        }
-      };
+  // System Logs functions
+  system: {
+    // Create a new system log entry
+    async createLog(logData: any) {
+      try {
+        const id = logData.id || uuidv4();
+        
+        await pool.query<ResultSetHeader>(`
+          INSERT INTO system_logs (
+            id, source, operation, message, details,
+            level, agent_id, plan_id, duration_ms
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          id,
+          logData.source,
+          logData.operation,
+          logData.message,
+          logData.details || null,
+          logData.level || 'info',
+          logData.agentId || null,
+          logData.planId || null,
+          logData.durationMs || 0
+        ]);
+        
+        return { id, ...logData };
+      } catch (error) {
+        console.error('Error creating system log:', error);
+        throw error;
+      }
+    },
+    
+    // Get all system logs with pagination
+    async getLogs(page = 1, limit = 20) {
+      try {
+        const offset = (page - 1) * limit;
+        
+        const [rows] = await pool.query<RowDataPacket[]>(`
+          SELECT 
+            id, source, operation, message, details,
+            level, agent_id AS agentId, plan_id AS planId,
+            duration_ms AS durationMs, created_at AS createdAt
+          FROM system_logs
+          ORDER BY created_at DESC
+          LIMIT ? OFFSET ?
+        `, [limit, offset]);
+        
+        // Get total count for pagination
+        const [countResult] = await pool.query<RowDataPacket[]>('SELECT COUNT(*) as total FROM system_logs');
+        const totalCount = countResult[0].total;
+        
+        return {
+          logs: rows,
+          pagination: {
+            page,
+            limit,
+            totalItems: totalCount,
+            totalPages: Math.ceil(totalCount / limit)
+          }
+        };
+      } catch (error) {
+        console.error('Error fetching system logs:', error);
+        return {
+          logs: [],
+          pagination: {
+            page,
+            limit,
+            totalItems: 0,
+            totalPages: 0
+          }
+        };
+      }
+    },
+    
+    // Get system logs for a specific agent
+    async getLogsByAgentId(agentId: string, page = 1, limit = 20) {
+      try {
+        const offset = (page - 1) * limit;
+        
+        const [rows] = await pool.query<RowDataPacket[]>(`
+          SELECT 
+            id, source, operation, message, details,
+            level, agent_id AS agentId, plan_id AS planId,
+            duration_ms AS durationMs, created_at AS createdAt
+          FROM system_logs
+          WHERE agent_id = ?
+          ORDER BY created_at DESC
+          LIMIT ? OFFSET ?
+        `, [agentId, limit, offset]);
+        
+        // Get total count for pagination
+        const [countResult] = await pool.query<RowDataPacket[]>(
+          'SELECT COUNT(*) as total FROM system_logs WHERE agent_id = ?',
+          [agentId]
+        );
+        const totalCount = countResult[0].total;
+        
+        return {
+          logs: rows,
+          pagination: {
+            page,
+            limit,
+            totalItems: totalCount,
+            totalPages: Math.ceil(totalCount / limit)
+          }
+        };
+      } catch (error) {
+        console.error(`Error fetching system logs for agent ${agentId}:`, error);
+        return {
+          logs: [],
+          pagination: {
+            page,
+            limit,
+            totalItems: 0,
+            totalPages: 0
+          }
+        };
+      }
     }
   }
 };
@@ -546,7 +671,13 @@ const db = {
   testConnection,
   agents,
   plans,
-  llmLogs
+  // Keep llmLogs for backward compatibility
+  llmLogs: {
+    createLog: logs.llm.createLog,
+    getLogs: logs.llm.getLogs,
+    getLogsByAgentId: logs.llm.getLogsByAgentId
+  },
+  logs
 };
 
 export default db;

@@ -20,7 +20,7 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
   const [error, setError] = useState<string | null>(null);
   const [command, setCommand] = useState<string>('');
   const [submitting, setSubmitting] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<'plan' | 'logs'>('plan');
+  const [activeTab, setActiveTab] = useState<'plan' | 'llm-logs' | 'system-logs'>('plan');
   
   // Fetch agent details on component mount
   useEffect(() => {
@@ -397,10 +397,16 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
             Current Plan
           </button>
           <button 
-            className={`tab-button ${activeTab === 'logs' ? 'active' : ''}`}
-            onClick={() => setActiveTab('logs')}
+            className={`tab-button ${activeTab === 'llm-logs' ? 'active' : ''}`}
+            onClick={() => setActiveTab('llm-logs')}
           >
-            LLM API Logs
+            LLM Logs
+          </button>
+          <button 
+            className={`tab-button ${activeTab === 'system-logs' ? 'active' : ''}`}
+            onClick={() => setActiveTab('system-logs')}
+          >
+            System Logs
           </button>
         </div>
         
@@ -438,9 +444,13 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
                 <p className="no-plan">No active plan. Send a command to create one.</p>
               )}
             </div>
+          ) : activeTab === 'llm-logs' ? (
+            <div className="logs-section">
+              <LogViewer agentId={agentId} logType="llm" />
+            </div>
           ) : (
             <div className="logs-section">
-              <LogViewer agentId={agentId} />
+              <LogViewer agentId={agentId} logType="system" />
             </div>
           )}
         </div>
