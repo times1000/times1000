@@ -6,6 +6,7 @@ import AgentDetails from './components/AgentDetails';
 import NavBar from './components/NavBar';
 import NewAgentForm from './components/NewAgentForm';
 import LogsDashboard from './components/LogsDashboard';
+import PendingApprovals from './components/PendingApprovals';
 import { AgentData } from '../types/agent';
 
 // Initialize Socket.io connection
@@ -135,6 +136,10 @@ function App() {
             <Route
               path="/logs"
               element={<LogsDashboard />}
+            />
+            <Route
+              path="/pending-approvals"
+              element={<PendingApprovals socket={socket} />}
             />
           </Routes>
         </div>

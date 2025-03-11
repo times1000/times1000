@@ -39,6 +39,9 @@ const Dashboard: React.FC<DashboardProps> = ({ agents, onDeleteAgent }) => {
     }
   };
   
+  // Filter agents awaiting approval
+  const awaitingApprovalAgents = agents.filter(agent => agent.status === AgentStatus.AWAITING_APPROVAL);
+  
   return (
     <div className="dashboard">
       <div className="dashboard-header">
@@ -47,6 +50,18 @@ const Dashboard: React.FC<DashboardProps> = ({ agents, onDeleteAgent }) => {
           Create New Agent
         </Link>
       </div>
+      
+      {awaitingApprovalAgents.length > 0 && (
+        <div className="awaiting-approval-banner">
+          <h2>Agents Awaiting Approval: {awaitingApprovalAgents.length}</h2>
+          <p>
+            You have agents with plans that need your approval.
+            <Link to="/pending-approvals" className="view-approvals-link">
+              View Pending Approvals
+            </Link>
+          </p>
+        </div>
+      )}
       
       {agents.length === 0 ? (
         <div className="no-agents">

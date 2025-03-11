@@ -25,6 +25,11 @@ const NavBar: React.FC = () => {
               API Logs
             </Link>
           </li>
+          <li className="nav-item">
+            <Link to="/pending-approvals" className="nav-link">
+              Pending Approvals
+            </Link>
+          </li>
         </ul>
       </div>
     </nav>

@@ -65,6 +65,12 @@ server.listen(PORT, () => {
 process.on('SIGTERM', async () => {
   console.log('SIGTERM signal received: closing HTTP server and database connections');
   
+  // Stop the background processor if it exists
+  if (app.backgroundProcessor) {
+    console.log('Stopping background processor');
+    app.backgroundProcessor.stop();
+  }
+  
   server.close(() => {
     console.log('HTTP server closed');
     
