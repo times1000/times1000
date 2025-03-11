@@ -129,7 +129,7 @@ async function logLLMOperation(operation: string, details: LLMLogDetails): Promi
     }
     
     try {
-      await db.logs.llm.createLog({
+      await db.llmLogs.createLog({
         id: logEntry.id,
         operation,
         model: details.model || 'unknown',
@@ -150,7 +150,7 @@ async function logLLMOperation(operation: string, details: LLMLogDetails): Promi
       
       // Try one more time with minimal data
       try {
-        await db.logs.llm.createLog({
+        await db.llmLogs.createLog({
           id: logEntry.id,
           operation,
           model: details.model || 'unknown',
@@ -246,7 +246,7 @@ async function logOperation(operation: string, details: LLMLogDetails): Promise<
  */
 async function getLLMLogs(page = 1, limit = 20): Promise<PaginationResult> {
   try {
-    return await db.logs.llm.getLogs(page, limit);
+    return await db.llmLogs.getLogs(page, limit);
   } catch (error) {
     console.error('Error fetching LLM logs:', error);
     return {
@@ -276,7 +276,7 @@ async function getSystemLogs(page = 1, limit = 20): Promise<PaginationResult> {
  */
 async function getLLMLogsByAgentId(agentId: string, page = 1, limit = 20): Promise<PaginationResult> {
   try {
-    return await db.logs.llm.getLogsByAgentId(agentId, page, limit);
+    return await db.llmLogs.getLogsByAgentId(agentId, page, limit);
   } catch (error) {
     console.error(`Error fetching LLM logs for agent ${agentId}:`, error);
     return {
