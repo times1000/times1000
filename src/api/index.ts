@@ -1,23 +1,22 @@
 import express from 'express';
 import { Server } from 'socket.io';
-import OpenAI from 'openai';
 import agentRoutes from './routes/agent-routes';
 import planRoutes from './routes/plan-routes';
 import logRoutes from './routes/log-routes';
-import { startBackgroundProcessor, BackgroundProcessor } from '../background-processor';
+import { startBackgroundProcessor } from '../background-processor';
 
 // Export a function to configure the API
-export function setupAPI(app: express.Application, io: Server, openai: OpenAI) {
+export function setupAPI(app: express.Application, io: Server) {
   // Add middleware
   app.use(express.json());
   
   // Register API routes
-  app.use('/api/agents', agentRoutes(io, openai));
-  app.use('/api/plans', planRoutes(io, openai));
+  app.use('/api/agents', agentRoutes(io));
+  app.use('/api/plans', planRoutes(io));
   app.use('/api/logs', logRoutes());
   
   // Start the background processor
-  const processor = startBackgroundProcessor(io, openai);
+  const processor = startBackgroundProcessor(io);
   
   // Store the processor reference in the app for cleanup
   (app as any).backgroundProcessor = processor;

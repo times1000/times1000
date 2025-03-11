@@ -2,8 +2,8 @@ import db from './db';
 import { logOperation } from './api/services/logging-service';
 import { executeAiProcessing } from './api/services/plan-service';
 import { Server } from 'socket.io';
-import OpenAI from 'openai';
-import { AgentStatus } from './types/agent';
+import { AgentStatus, AgentData } from './types/agent';
+import { RowDataPacket } from 'mysql2';
 
 /**
  * Background processor that checks for agents with plans awaiting approval
@@ -11,14 +11,12 @@ import { AgentStatus } from './types/agent';
  */
 export class BackgroundProcessor {
   private io: Server;
-  private openai: OpenAI;
   private running: boolean = false;
   private pollInterval: number = 5000; // 5 seconds
   private intervalId: NodeJS.Timeout | null = null;
 
-  constructor(io: Server, openai: OpenAI) {
+  constructor(io: Server) {
     this.io = io;
-    this.openai = openai;
     
     // Add error handler for Socket.IO
     this.io.on('error', (error) => {
@@ -38,9 +36,12 @@ export class BackgroundProcessor {
       return;
     }
 
-    // Verify OpenAI API key is set
-    if (!process.env.OPENAI_API_KEY) {
-      console.warn('WARNING: Starting background processor without OpenAI API key. LLM tasks will fail.');
+    // Verify LLM API keys are set
+    const hasOpenAIKey = !!process.env.OPENAI_API_KEY;
+    const hasAnthropicKey = !!process.env.ANTHROPIC_API_KEY;
+    
+    if (!hasOpenAIKey && !hasAnthropicKey) {
+      console.warn('WARNING: Starting background processor without any LLM API keys. LLM tasks will fail.');
     }
 
     console.log('Starting background processor');
@@ -56,7 +57,9 @@ export class BackgroundProcessor {
 
     logOperation('background_processor_started', {
       pollInterval: this.pollInterval,
-      hasApiKey: !!process.env.OPENAI_API_KEY
+      hasOpenAIKey,
+      hasAnthropicKey,
+      defaultProvider: process.env.DEFAULT_LLM_PROVIDER || 'openai'
     });
   }
 
@@ -104,26 +107,36 @@ export class BackgroundProcessor {
   private async processApprovedPlans(): Promise<void> {
     try {
       // Find agents with executing status
-      const agents = await db.agents.getAgentsByStatus(AgentStatus.EXECUTING);
+      // Use direct query as a workaround for type issues
+      const [rows] = await db.pool.query(
+        'SELECT * FROM agents WHERE status = ?', 
+        [AgentStatus.EXECUTING]
+      );
+      
+      // Convert result to an array of agents
+      const agents = rows as RowDataPacket[];
       
       for (const agent of agents) {
         // Get the latest plan for this agent
         const plan = await db.plans.getCurrentPlanForAgent(agent.id);
         if (!plan) continue;
         
+        // Converting to any for safety since RowDataPacket doesn't have the expected fields
+        const planData = plan as any;
+        
         // If plan exists and is approved but not executing yet
-        if (plan.status === 'approved') {
-          console.log(`Processing approved plan ${plan.id} for agent ${agent.id}`);
+        if (planData.status === 'approved') {
+          console.log(`Processing approved plan ${planData.id} for agent ${agent.id}`);
           
           // Log the operation
           await logOperation('background_processing_plan', {
             agentId: agent.id,
-            planId: plan.id,
+            planId: planData.id,
             agentName: agent.name
           });
           
           // Execute the plan in background
-          executeAiProcessing(this.openai, this.io, agent.id, plan.id);
+          executeAiProcessing(this.io, agent.id, planData.id);
         }
       }
     } catch (error) {
@@ -138,7 +151,14 @@ export class BackgroundProcessor {
   private async processAwaitingApprovalAgents(): Promise<void> {
     try {
       // Find agents with awaiting_approval status
-      const agents = await db.agents.getAgentsByStatus(AgentStatus.AWAITING_APPROVAL);
+      // Use direct query as a workaround for type issues
+      const [rows] = await db.pool.query(
+        'SELECT * FROM agents WHERE status = ?',
+        [AgentStatus.AWAITING_APPROVAL]
+      );
+      
+      // Convert result to an array of agents
+      const agents = rows as RowDataPacket[];
       
       if (agents.length > 0) {
         // Emit a socket event with all agents awaiting approval
@@ -170,8 +190,8 @@ export class BackgroundProcessor {
 /**
  * Create and start the background processor
  */
-export function startBackgroundProcessor(io: Server, openai: OpenAI): BackgroundProcessor {
-  const processor = new BackgroundProcessor(io, openai);
+export function startBackgroundProcessor(io: Server): BackgroundProcessor {
+  const processor = new BackgroundProcessor(io);
   processor.start();
   return processor;
 }

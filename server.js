@@ -6,21 +6,22 @@ const { setupAPI } = require('./dist/api');
 require('dotenv').config();
 const { v4: uuidv4 } = require('uuid');
 const db = require('./dist/db');
-const OpenAI = require('openai');
 
 // Initialize Express app and server
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || '',
-});
+// Verify LLM API keys are configured
+const hasOpenAIKey = !!process.env.OPENAI_API_KEY;
+const hasAnthropicKey = !!process.env.ANTHROPIC_API_KEY;
 
-// Verify API key is configured
-if (!process.env.OPENAI_API_KEY) {
-  console.warn('WARNING: OPENAI_API_KEY environment variable not set. LLM features will not work correctly.');
+if (!hasOpenAIKey && !hasAnthropicKey) {
+  console.warn('WARNING: No LLM API keys (OPENAI_API_KEY or ANTHROPIC_API_KEY) are set. LLM features will not work correctly.');
+} else {
+  console.log(`Using LLM provider: ${process.env.DEFAULT_LLM_PROVIDER || 'openai'} (default)`);
+  if (hasOpenAIKey) console.log('OpenAI API key is configured');
+  if (hasAnthropicKey) console.log('Anthropic API key is configured');
 }
 
 // Test database connection on startup and force reload
@@ -31,7 +32,7 @@ db.default.testConnection();
 exports.pool = db.pool;
 
 // Set up API routes
-setupAPI(app, io, openai);
+setupAPI(app, io);
 
 // Serve static files from the dist directory
 app.use(express.static(path.join(__dirname, 'dist')));

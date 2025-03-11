@@ -2,7 +2,6 @@ import { v4 as uuidv4 } from 'uuid';
 import db from '../../db';
 import { logOperation } from './logging-service';
 import { Server } from 'socket.io';
-import OpenAI from 'openai';
 import * as llm from '../../services/llm';
 import { Plan } from '../../types/db'; // PlanStep and PlanRowData are unused
 import { Agent } from '../../core/Agent';
@@ -11,12 +10,17 @@ import { generatePlan as generateAgentPlan, generateAgentMetadataFromPlan } from
 /**
  * Generate a plan using agent's receiveCommand method
  */
-async function generatePlan(openai: OpenAI, agent: any, command: string) {
+async function generatePlan(agent: any, command: string) {
+  // Get model from environment or default
+  const model = process.env.DEFAULT_PLAN_MODEL || 'gpt-4o';
+  const provider = process.env.DEFAULT_LLM_PROVIDER || 'openai';
+  
   // Log the AI request for plan generation
   logOperation('ai_plan_generation', {
     agentId: agent.id,
     command,
-    model: 'gpt-4-turbo',
+    model,
+    provider,
     temperature: 0.7
   });
 
@@ -73,15 +77,15 @@ async function generatePlan(openai: OpenAI, agent: any, command: string) {
   } catch (error) {
     console.error('Error generating plan with agent:', error);
     
-    // Fall back to the original OpenAI implementation if the agent method fails
-    return generatePlanWithOpenAI(openai, agent, command);
+    // Fall back to the LLM implementation if the agent method fails
+    return generatePlanWithLLM(agent, command);
   }
 }
 
 /**
- * Original implementation using OpenAI directly
+ * Implementation using the abstracted LLM service
  */
-async function generatePlanWithOpenAI(openai: OpenAI, agent: any, command: string) {
+async function generatePlanWithLLM(agent: any, command: string) {
   try {
     // Create a temporary Agent instance
     const tempAgent = new Agent(agent.id, agent.name, agent.description);
@@ -91,7 +95,8 @@ async function generatePlanWithOpenAI(openai: OpenAI, agent: any, command: strin
       tempAgent.capabilities = agent.capabilities;
     }
     
-    // Use the core PlanGenerator directly
+    // Use the core PlanGenerator directly - but we need to update this too
+    // Will have to refactor later to fully use the LLM abstraction in PlanGenerator
     const { plan, agentNameAndDescription } = await generateAgentPlan(tempAgent, command, true);
     
     // Create the plan structure for the database
@@ -127,7 +132,7 @@ async function generatePlanWithOpenAI(openai: OpenAI, agent: any, command: strin
     
     return dbPlan;
   } catch (error) {
-    console.error('Error generating plan with OpenAI:', error);
+    console.error('Error generating plan with LLM service:', error);
     
     // Fallback to a basic plan structure if API fails
     return generateFallbackPlan(agent, command);
@@ -198,13 +203,18 @@ function generateFallbackPlan(agent: any, command: string): any {
 /**
  * Execute the AI processing for a plan
  */
-async function executeAiProcessing(openai: OpenAI, io: Server, agentId: string, planId: string): Promise<void> {
+async function executeAiProcessing(io: Server, agentId: string, planId: string): Promise<void> {
   try {
+    // Get model from environment or default
+    const model = process.env.DEFAULT_PLAN_MODEL || 'gpt-4o';
+    const provider = process.env.DEFAULT_LLM_PROVIDER || 'openai';
+    
     // Log the operation
     await logOperation('ai_processing_started', {
       agentId,
       planId,
-      model: 'gpt-4-turbo',
+      model,
+      provider,
       task: 'plan_execution'
     });
     
@@ -360,7 +370,7 @@ async function executeAiProcessing(openai: OpenAI, io: Server, agentId: string, 
     await agentInstance.executePlan();
     
     // Generate follow-up suggestions
-    const followUpSuggestions = await generateFollowUpSuggestions(openai, plan, agent);
+    const followUpSuggestions = await generateFollowUpSuggestions(plan, agent);
     
     // Log follow-up generation
     await logOperation('follow_up_generation', {
@@ -426,15 +436,19 @@ async function executeAiProcessing(openai: OpenAI, io: Server, agentId: string, 
     });
     
     // If the agent-based approach failed, fall back to the original method
-    await executeAiProcessingFallback(openai, io, agentId, planId);
+    await executeAiProcessingFallback(io, agentId, planId);
   }
 }
 
 /**
  * Updated implementation of executeAiProcessing to use as fallback
  */
-async function executeAiProcessingFallback(openai: OpenAI, io: Server, agentId: string, planId: string): Promise<void> {
+async function executeAiProcessingFallback(io: Server, agentId: string, planId: string): Promise<void> {
   try {
+    // Get model from environment or default
+    const model = process.env.DEFAULT_PLAN_MODEL || 'gpt-4o';
+    const provider = process.env.DEFAULT_LLM_PROVIDER || 'openai';
+    
     const plan = await db.plans.getCurrentPlanForAgent(agentId);
     // Convert to any for type safety
     const planData = plan as any;
@@ -466,7 +480,9 @@ async function executeAiProcessingFallback(openai: OpenAI, io: Server, agentId: 
         planId,
         stepId: step.id,
         stepNumber: i + 1,
-        totalSteps: plan.steps.length
+        totalSteps: plan.steps.length,
+        model,
+        provider
       });
       
       // Update step to in_progress - use direct query as workaround
@@ -484,8 +500,8 @@ async function executeAiProcessingFallback(openai: OpenAI, io: Server, agentId: 
         status: 'in_progress'
       });
       
-      // Execute the step with OpenAI - pass agent context
-      const result = await executeStepWithAI(openai, plan, step, i + 1, agent);
+      // Execute the step with LLM service - pass agent context
+      const result = await executeStepWithLLM(plan, step, i + 1, agent);
       
       // Complete the step - use direct query as workaround
       await db.pool.query(`
@@ -558,10 +574,14 @@ async function executeAiProcessingFallback(openai: OpenAI, io: Server, agentId: 
 }
 
 /**
- * Execute a step with OpenAI
+ * Execute a step with abstracted LLM service
  */
-async function executeStepWithAI(openai: OpenAI, plan: any, step: any, stepNumber: number, agent: any = null): Promise<string> {
+async function executeStepWithLLM(plan: any, step: any, stepNumber: number, agent: any = null): Promise<string> {
   try {
+    // Get model from environment or default
+    const model = process.env.DEFAULT_STEP_MODEL || 'gpt-4o';
+    const provider = process.env.DEFAULT_LLM_PROVIDER || 'openai';
+    
     // Build the prompt for step execution with agent context
     const agentInfo = agent ? `
 Agent: ${agent.name}
@@ -589,7 +609,8 @@ Please execute this step and provide a detailed, thoughtful response as if you w
     const response = await llm.chatCompletion(
       messages,
       {
-        model: 'gpt-4o',
+        model,
+        provider,
         temperature: 0.7,
         maxTokens: 1500
       },
@@ -602,7 +623,7 @@ Please execute this step and provide a detailed, thoughtful response as if you w
     
     return response.content;
   } catch (error) {
-    console.error('Error executing step:', error);
+    console.error('Error executing step with LLM service:', error);
     // Fall back to a fake result if LLM call fails
     return generateFakeStepResult(step.description);
   }
@@ -611,13 +632,18 @@ Please execute this step and provide a detailed, thoughtful response as if you w
 /**
  * Generate follow-up suggestions based on the plan
  */
-async function generateFollowUpSuggestions(openai: OpenAI, plan: any, agent: any): Promise<string[]> {
+async function generateFollowUpSuggestions(plan: any, agent: any): Promise<string[]> {
+  // Get model from environment or default
+  const model = process.env.DEFAULT_FOLLOWUP_MODEL || 'gpt-4o';
+  const provider = process.env.DEFAULT_LLM_PROVIDER || 'openai';
+  
   // Log the AI request for follow-up suggestions
   logOperation('ai_followup_generation', {
     planId: plan.id,
     agentId: plan.agentId,
     command: plan.command,
-    model: 'gpt-4-turbo'
+    model,
+    provider
   });
   
   try {
@@ -639,7 +665,8 @@ Respond with a JSON array of follow-up suggestions, where each item is a clear, 
       prompt,
       "Generate follow-up suggestions after a completed task", 
       { 
-        model: 'gpt-4o',
+        model,
+        provider,
         temperature: 0.7
       },
       {
@@ -660,13 +687,13 @@ Respond with a JSON array of follow-up suggestions, where each item is a clear, 
     // If we can't parse the response correctly, fall back to generated suggestions
     return generateFallbackFollowUps(agent);
   } catch (error) {
-    console.error('Error generating follow-up suggestions with OpenAI:', error);
+    console.error('Error generating follow-up suggestions with LLM service:', error);
     return generateFallbackFollowUps(agent);
   }
 }
 
 /**
- * Generate fallback follow-up suggestions when OpenAI API fails
+ * Generate fallback follow-up suggestions when LLM service fails
  */
 function generateFallbackFollowUps(agent: any): string[] {
   // Extract useful keywords from agent name and description
@@ -702,7 +729,7 @@ function generateFallbackFollowUps(agent: any): string[] {
 }
 
 /**
- * Generate fake result text for a step (fallback when OpenAI fails)
+ * Generate fake result text for a step (fallback when LLM service fails)
  */
 function generateFakeStepResult(description: string): string {
   const responses = [

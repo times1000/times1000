@@ -3,11 +3,10 @@ import { v4 as uuidv4 } from 'uuid';
 import db from '../../db';
 import { logOperation } from '../services/logging-service';
 import { Server } from 'socket.io';
-import OpenAI from 'openai';
 import { Agent } from '../../core/Agent';
 import { AgentCreationRequest } from '../../types/agent';
 
-export default function(io: Server, _openai: OpenAI) {
+export default function(io: Server) {
   const router = express.Router();
 
   // Get all agents

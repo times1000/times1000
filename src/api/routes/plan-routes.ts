@@ -1,11 +1,10 @@
 import express from 'express';
 import db from '../../db';
-import { executeAiProcessing, generateFollowUpSuggestions } from '../services/plan-service';
+import { executeAiProcessing } from '../services/plan-service';
 import { logOperation } from '../services/logging-service';
 import { Server } from 'socket.io';
-import OpenAI from 'openai';
 
-export default function(io: Server, openai: OpenAI) {
+export default function(io: Server) {
   const router = express.Router();
 
   // Approve a plan
@@ -53,7 +52,7 @@ export default function(io: Server, openai: OpenAI) {
       });
       
       // Start the AI processing in the background
-      executeAiProcessing(openai, io, agent.id, req.params.planId);
+      executeAiProcessing(io, agent.id, req.params.planId);
       
       res.json({
         planId: req.params.planId,
@@ -201,8 +200,10 @@ export default function(io: Server, openai: OpenAI) {
         return res.status(404).json({ error: 'Agent not found' });
       }
       
-      // Generate follow-up suggestions using OpenAI
-      const followUpSuggestions = await generateFollowUpSuggestions(openai, plan, agent);
+      // Import generateFollowUpSuggestions function
+      // This is a dynamic import to avoid circular dependency issues
+      const planService = await import('../services/plan-service');
+      const followUpSuggestions = await planService.generateFollowUpSuggestions(plan, agent);
       
       // Store follow-up suggestions in the database
       try {
