@@ -10,6 +10,13 @@
   --card-bg: #ffffff;
   --text-color: #1e293b;
   --border-color: #e2e8f0;
+  
+  /* New spacing variables */
+  --space-xs: 0.5rem;
+  --space-sm: 0.75rem;
+  --space-md: 1.25rem;
+  --space-lg: 2rem;
+  --space-xl: 3rem;
 }
 
 * {
@@ -19,18 +26,20 @@
 }
 
 body {
-  font-family: 'Open Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
     Ubuntu, Cantarell, 'Helvetica Neue', sans-serif;
   line-height: 1.6;
   color: var(--text-color);
   background-color: var(--bg-color);
+  letter-spacing: -0.011em;
 }
 
 /* Navbar */
 .navbar {
   background-color: var(--primary-color);
-  padding: 1rem 2rem;
+  padding: var(--space-md) var(--space-lg);
   color: white;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
 }
 
 .navbar-container {
@@ -76,7 +85,7 @@ body {
 .container {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 2rem;
+  padding: var(--space-xl);
 }
 
 /* Dashboard */
@@ -84,45 +93,95 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 2rem;
+  margin-bottom: var(--space-lg);
+}
+
+/* Approval Banner */
+.awaiting-approval-banner {
+  background-color: #fff4de;
+  border: 1px solid #ffedd5;
+  border-left: 4px solid var(--warning-color);
+  border-radius: 0.5rem;
+  padding: var(--space-md) var(--space-lg);
+  margin-bottom: var(--space-xl);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+}
+
+.awaiting-approval-banner h2 {
+  color: #92400e;
+  font-size: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.awaiting-approval-banner p {
+  color: #78350f;
+  margin-bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  align-items: center;
+}
+
+.view-approvals-link {
+  display: inline-block;
+  background-color: var(--warning-color);
+  color: white;
+  text-decoration: none;
+  padding: 0.5rem 1rem;
+  border-radius: 0.25rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.view-approvals-link:hover {
+  background-color: #d97706;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.15);
 }
 
 .button {
   display: inline-block;
-  padding: 0.5rem 1rem;
+  padding: 0.6rem 1.2rem;
   background-color: var(--primary-color);
   color: white;
   border: none;
   border-radius: 0.25rem;
   text-decoration: none;
   cursor: pointer;
-  transition: background-color 0.3s ease;
+  transition: all 0.3s ease;
+  font-weight: 500;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .button:hover {
   background-color: var(--primary-dark);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
 }
 
 .agent-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--space-lg);
 }
 
 .agent-card {
   background-color: var(--card-bg);
-  border-radius: 0.5rem;
-  padding: 1.5rem;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  border-radius: 0.75rem;
+  padding: var(--space-lg);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
   transition: transform 0.3s ease, box-shadow 0.3s ease;
   text-decoration: none;
   color: var(--text-color);
   position: relative;
+  border: 1px solid rgba(0, 0, 0, 0.05);
 }
 
 .agent-card:hover {
   transform: translateY(-5px);
-  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.12);
+  border-color: rgba(0, 0, 0, 0.08);
 }
 
 .agent-card-header {
@@ -227,34 +286,48 @@ body {
   max-width: 700px;
   margin: 0 auto;
   background-color: var(--card-bg);
-  padding: 2rem;
-  border-radius: 0.5rem;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  padding: var(--space-xl);
+  border-radius: 0.75rem;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(0, 0, 0, 0.05);
 }
 
 .create-agent-form h1 {
-  margin-bottom: 1.5rem;
+  margin-bottom: var(--space-lg);
+  color: var(--primary-color);
+  font-size: 1.75rem;
 }
 
 .form-group {
-  margin-bottom: 1.5rem;
+  margin-bottom: var(--space-lg);
 }
 
 .form-group label {
   display: block;
-  margin-bottom: 0.5rem;
-  font-weight: 500;
+  margin-bottom: var(--space-xs);
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--primary-dark);
 }
 
 .form-group input,
 .form-group select,
 .form-group textarea {
   width: 100%;
-  padding: 0.75rem;
-  border: 1px solid var(--border-color);
-  border-radius: 0.25rem;
+  padding: var(--space-sm) var(--space-md);
+  border: 1.5px solid var(--border-color);
+  border-radius: 0.375rem;
   font-size: 1rem;
   font-family: inherit;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  outline: none;
+  border-color: var(--primary-light);
+  box-shadow: 0 0 0 3px rgba(38, 38, 38, 0.1);
 }
 
 .type-description {
@@ -282,22 +355,29 @@ body {
 }
 
 .create-button {
-  padding: 0.75rem 1.5rem;
+  padding: 0.75rem 1.75rem;
   background-color: var(--primary-color);
   color: white;
   border: none;
-  border-radius: 0.25rem;
+  border-radius: 0.375rem;
   cursor: pointer;
-  transition: background-color 0.3s ease;
+  transition: all 0.3s ease;
+  font-weight: 600;
+  font-size: 1rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .create-button:hover {
   background-color: var(--primary-dark);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
 }
 
 .create-button:disabled {
   background-color: var(--neutral-color);
   cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 .error-message {
@@ -581,14 +661,16 @@ body {
 }
 
 .tab-button {
-  padding: 0.75rem 1.5rem;
+  padding: var(--space-sm) var(--space-lg);
   background-color: transparent;
   border: none;
   border-bottom: 3px solid transparent;
   cursor: pointer;
-  font-weight: 500;
+  font-weight: 600;
   transition: all 0.2s ease;
   color: var(--neutral-color);
+  font-size: 1rem;
+  margin-right: var(--space-xs);
 }
 
 .tab-button:hover {
@@ -827,6 +909,214 @@ body {
   white-space: pre-wrap;
   max-height: 400px;
   overflow-y: auto;
+}
+
+/* Pending Approvals Page */
+.pending-approvals {
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.pending-approvals h2 {
+  margin-bottom: var(--space-lg);
+  color: var(--primary-color);
+  font-size: 1.75rem;
+}
+
+.empty-state {
+  text-align: center;
+  padding: var(--space-xl);
+  background-color: var(--card-bg);
+  border-radius: 0.75rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.approval-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.approval-item {
+  background-color: var(--card-bg);
+  border-radius: 0.75rem;
+  padding: var(--space-lg);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.approval-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.approval-header h3 {
+  margin: 0;
+  font-size: 1.5rem;
+  color: var(--primary-color);
+  margin-right: var(--space-md);
+}
+
+.status-badge.awaiting {
+  background-color: #fef3c7;
+  color: #92400e;
+  padding: 0.35rem 0.75rem;
+  border-radius: 1rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.agent-type {
+  color: var(--neutral-color);
+  font-size: 0.875rem;
+}
+
+.plan-details {
+  margin-bottom: var(--space-md);
+  font-size: 0.95rem;
+}
+
+.plan-details p {
+  margin-bottom: var(--space-xs);
+  line-height: 1.6;
+}
+
+.plan-details strong {
+  color: var(--primary-dark);
+}
+
+.plan-reasoning, .agent-personality {
+  margin-top: var(--space-md);
+  padding: var(--space-md);
+  background-color: #f8fafc;
+  border-radius: 0.5rem;
+  border-left: 3px solid var(--primary-light);
+}
+
+.plan-steps {
+  margin: var(--space-lg) 0;
+}
+
+.plan-steps h4 {
+  margin-bottom: var(--space-sm);
+  color: var(--primary-dark);
+}
+
+.plan-steps ol {
+  padding-left: var(--space-lg);
+}
+
+.plan-steps li {
+  margin-bottom: var(--space-xs);
+  padding: var(--space-xs) 0;
+}
+
+.step-duration {
+  font-size: 0.8rem;
+  color: var(--neutral-color);
+  margin-left: var(--space-xs);
+}
+
+.approval-actions {
+  margin-top: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.action-buttons {
+  display: flex;
+  gap: var(--space-md);
+}
+
+.btn {
+  padding: 0.6rem 1.2rem;
+  border: none;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-weight: 600;
+  font-size: 0.95rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.approve-btn {
+  background-color: var(--success-color);
+  color: white;
+}
+
+.approve-btn:hover {
+  background-color: #15803d;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.15);
+}
+
+.reject-btn {
+  background-color: var(--danger-color);
+  color: white;
+}
+
+.reject-btn:hover {
+  background-color: #b91c1c;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.15);
+}
+
+.command-form {
+  margin-top: var(--space-md);
+}
+
+.command-form form {
+  display: flex;
+  gap: var(--space-xs);
+}
+
+.command-form input {
+  flex: 1;
+  padding: var(--space-sm) var(--space-md);
+  border: 1.5px solid var(--border-color);
+  border-radius: 0.375rem;
+  font-size: 0.95rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.command-form input:focus {
+  outline: none;
+  border-color: var(--primary-light);
+  box-shadow: 0 0 0 3px rgba(38, 38, 38, 0.1);
+}
+
+.cmd-btn {
+  background-color: var(--primary-color);
+  color: white;
+}
+
+.cmd-btn:hover {
+  background-color: var(--primary-dark);
+}
+
+.view-details {
+  margin-top: var(--space-md);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.details-btn {
+  background-color: transparent;
+  color: var(--primary-color);
+  border: 1px solid var(--primary-color);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.details-btn:hover {
+  background-color: rgba(38, 38, 38, 0.05);
 }
 
 /* Utility classes */
