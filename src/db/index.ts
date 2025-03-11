@@ -314,6 +314,34 @@ const agentOperations = {
       console.error(`Error deleting agent ${id}:`, error);
       throw error;
     }
+  },
+  
+  // Get agents by status
+  getAgentsByStatus: async (status: string) => {
+    try {
+      const [rowsResult] = await pool.query(`
+        SELECT 
+          id, name, type, description, status, 
+          capabilities, created_at AS createdAt, 
+          last_active AS lastActive 
+        FROM agents 
+        WHERE status = ?
+      `, [status]);
+      
+      // Safely handle the result
+      const rows = Array.isArray(rowsResult) ? rowsResult : [];
+      
+      // Convert capabilities from JSON string to array if needed
+      return rows.map((agent: any) => ({
+        ...agent,
+        capabilities: typeof agent.capabilities === 'string' 
+          ? JSON.parse(agent.capabilities) 
+          : agent.capabilities || []
+      }));
+    } catch (error) {
+      console.error(`Error fetching agents with status ${status}:`, error);
+      throw error;
+    }
   }
 };
 

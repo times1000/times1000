@@ -4,6 +4,7 @@ import { executeAiProcessing } from './api/services/plan-service';
 import { Server } from 'socket.io';
 import OpenAI from 'openai';
 import { AgentStatus } from './types/agent';
+import { Plan } from './types/db';
 
 /**
  * Background processor that checks for agents with plans awaiting approval
@@ -108,7 +109,7 @@ export class BackgroundProcessor {
       
       for (const agent of agents) {
         // Get the latest plan for this agent
-        const plan = await db.plans.getCurrentPlanForAgent(agent.id);
+        const plan = await db.plans.getCurrentPlanForAgent(agent.id as string) as Plan | null;
         if (!plan) continue;
         
         // If plan exists and is approved but not executing yet
@@ -123,7 +124,7 @@ export class BackgroundProcessor {
           });
           
           // Execute the plan in background
-          executeAiProcessing(this.openai, this.io, agent.id, plan.id);
+          executeAiProcessing(this.openai, this.io, agent.id as string, plan.id as string);
         }
       }
     } catch (error) {
@@ -144,7 +145,7 @@ export class BackgroundProcessor {
         // Emit a socket event with all agents awaiting approval
         const awaitingApprovalData = await Promise.all(
           agents.map(async (agent) => {
-            const plan = await db.plans.getCurrentPlanForAgent(agent.id);
+            const plan = await db.plans.getCurrentPlanForAgent(agent.id as string) as Plan | null;
             return {
               agent,
               plan: plan || null
