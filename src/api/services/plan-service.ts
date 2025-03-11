@@ -3,14 +3,20 @@ import db from '../../db';
 import { logOperation } from './logging-service';
 import { Server } from 'socket.io';
 import * as llm from '../../services/llm';
-import { Plan } from '../../types/db'; // PlanStep and PlanRowData are unused
+import { Plan } from '../../types/db'; 
+import { StepStatus, PlanStatus } from '../../core/Plan';
 import { Agent } from '../../core/Agent';
-import { generatePlan as generateAgentPlan, generateAgentMetadataFromPlan } from '../../core/PlanGenerator';
+import { generatePlan as generateAgentPlan, generateAgentMetadataFromPlan, AgentNameAndDescription } from '../../core/PlanGenerator';
 
 /**
- * Generate a plan using agent's receiveCommand method
+ * Generate a plan asynchronously
+ * This method is intended to be called by the background processor
  */
-async function generatePlan(agent: any, command: string) {
+async function generatePlan(
+  agent: any, 
+  command: string, 
+  isInitialPlan: boolean = false
+): Promise<{ plan: Plan; agentNameAndDescription?: AgentNameAndDescription }> {
   // Get model from environment or default
   const model = process.env.DEFAULT_PLAN_MODEL || 'gpt-4o';
   const provider = process.env.DEFAULT_LLM_PROVIDER || 'openai';
@@ -19,6 +25,7 @@ async function generatePlan(agent: any, command: string) {
   logOperation('ai_plan_generation', {
     agentId: agent.id,
     command,
+    isInitialPlan,
     model,
     provider,
     temperature: 0.7
@@ -30,19 +37,24 @@ async function generatePlan(agent: any, command: string) {
     
     // Set capabilities if they exist
     if (agent.capabilities && Array.isArray(agent.capabilities)) {
-      agentInstance.capabilities = agent.capabilities;
+      agentInstance.addCapabilities(agent.capabilities);
     }
     
     // Set personality profile if it exists
     if (agent.personalityProfile) {
-      agentInstance.personalityProfile = agent.personalityProfile;
+      agentInstance.setPersonalityProfile(agent.personalityProfile);
     }
     
-    // Generate a plan using the agent instance
-    const plan = await agentInstance.receiveCommand(command);
-    const agentNameAndDescription = agentInstance.name !== agent.name || agentInstance.description !== agent.description
-      ? { name: agentInstance.name, description: agentInstance.description }
-      : undefined;
+    // Set settings if they exist
+    if (agent.settings && typeof agent.settings === 'object') {
+      Object.entries(agent.settings).forEach(([key, value]) => {
+        agentInstance.setSetting(key, value);
+      });
+    }
+    
+    // Call PlanGenerator directly instead of going through agent methods
+    // This avoids the synchronous API calls in the agent methods
+    const { plan, agentNameAndDescription } = await generateAgentPlan(agentInstance, command, isInitialPlan);
     
     // Create the plan structure for the database
     const dbPlan: Plan = {
@@ -51,11 +63,11 @@ async function generatePlan(agent: any, command: string) {
       command,
       description: plan.description,
       reasoning: plan.reasoning,
-      status: 'awaiting_approval',
+      status: 'awaiting_approval' as PlanStatus,
       steps: plan.steps.map((step, index) => ({
         id: uuidv4(),
         description: step.description,
-        status: 'pending',
+        status: 'pending' as StepStatus,
         estimatedDuration: step.estimatedDuration || 30,
         details: step.details || '',
         position: index
@@ -68,24 +80,22 @@ async function generatePlan(agent: any, command: string) {
       dbPlan.hasFollowUp = true;
     }
     
-    // If agent name and description were generated, include them
-    if (agentNameAndDescription) {
-      (dbPlan as any).agentNameAndDescription = agentNameAndDescription;
-    }
-    
-    return dbPlan;
+    return { 
+      plan: dbPlan, 
+      agentNameAndDescription 
+    };
   } catch (error) {
     console.error('Error generating plan with agent:', error);
     
-    // Fall back to the LLM implementation if the agent method fails
-    return generatePlanWithLLM(agent, command);
+    // Fall back to the LLM implementation if the direct method fails
+    return generatePlanWithLLM(agent, command, isInitialPlan);
   }
 }
 
 /**
  * Implementation using the abstracted LLM service
  */
-async function generatePlanWithLLM(agent: any, command: string) {
+async function generatePlanWithLLM(agent: any, command: string, isInitialPlan: boolean = false): Promise<{ plan: Plan; agentNameAndDescription?: AgentNameAndDescription }> {
   try {
     // Create a temporary Agent instance
     const tempAgent = new Agent(agent.id, agent.name, agent.description);
@@ -95,22 +105,21 @@ async function generatePlanWithLLM(agent: any, command: string) {
       tempAgent.capabilities = agent.capabilities;
     }
     
-    // Use the core PlanGenerator directly - but we need to update this too
-    // Will have to refactor later to fully use the LLM abstraction in PlanGenerator
-    const { plan, agentNameAndDescription } = await generateAgentPlan(tempAgent, command, true);
+    // Use the core PlanGenerator directly
+    const { plan, agentNameAndDescription } = await generateAgentPlan(tempAgent, command, isInitialPlan);
     
     // Create the plan structure for the database
-    const dbPlan: any = {
+    const dbPlan: Plan = {
       id: uuidv4(),
       agentId: agent.id,
       command,
       description: plan.description,
       reasoning: plan.reasoning,
-      status: 'awaiting_approval',
+      status: 'awaiting_approval' as PlanStatus,
       steps: plan.steps.map((step, index) => ({
         id: uuidv4(),
         description: step.description,
-        status: 'pending',
+        status: 'pending' as StepStatus,
         estimatedDuration: step.estimatedDuration || 30,
         details: step.details || '',
         position: index
@@ -125,12 +134,10 @@ async function generatePlanWithLLM(agent: any, command: string) {
       dbPlan.hasFollowUp = true;
     }
     
-    // Include agent name and description if generated
-    if (agentNameAndDescription) {
-      dbPlan.agentNameAndDescription = agentNameAndDescription;
-    }
-    
-    return dbPlan;
+    return {
+      plan: dbPlan,
+      agentNameAndDescription
+    };
   } catch (error) {
     console.error('Error generating plan with LLM service:', error);
     
@@ -142,7 +149,7 @@ async function generatePlanWithLLM(agent: any, command: string) {
 /**
  * Generate a fallback plan when OpenAI API fails
  */
-function generateFallbackPlan(agent: any, command: string): any {
+function generateFallbackPlan(agent: any, command: string): { plan: Plan; agentNameAndDescription?: AgentNameAndDescription } {
   const planDescription = `Process request: "${command}"`;
   const planReasoning = `This plan will systematically analyze, process, and generate results for the provided command.`;
   
@@ -151,27 +158,27 @@ function generateFallbackPlan(agent: any, command: string): any {
     {
       id: uuidv4(),
       description: 'Analyze and parse command parameters',
-      status: 'pending',
+      status: 'pending' as StepStatus,
       estimatedDuration: 30,
       position: 0
     },
     {
       id: uuidv4(),
       description: 'Process command with optimal settings',
-      status: 'pending',
+      status: 'pending' as StepStatus,
       estimatedDuration: 90,
       position: 1
     },
     {
       id: uuidv4(),
       description: 'Generate results and recommendations',
-      status: 'pending',
+      status: 'pending' as StepStatus,
       estimatedDuration: 60,
       position: 2
     }
   ];
   
-  // Also generate a name and description for the agent if this is a new agent
+  // Also generate a name and description for the agent
   let agentNameAndDescription = undefined;
   
   try {
@@ -188,14 +195,18 @@ function generateFallbackPlan(agent: any, command: string): any {
     console.error('Error generating fallback agent metadata:', e);
   }
   
-  return {
+  const plan: Plan = {
     id: uuidv4(),
     agentId: agent.id,
     command,
     description: planDescription,
     reasoning: planReasoning,
-    status: 'awaiting_approval',
-    steps,
+    status: 'awaiting_approval' as PlanStatus,
+    steps
+  };
+  
+  return {
+    plan,
     agentNameAndDescription
   };
 }

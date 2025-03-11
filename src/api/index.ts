@@ -10,13 +10,13 @@ export function setupAPI(app: express.Application, io: Server) {
   // Add middleware
   app.use(express.json());
   
-  // Register API routes
-  app.use('/api/agents', agentRoutes(io));
-  app.use('/api/plans', planRoutes(io));
-  app.use('/api/logs', logRoutes());
-  
   // Start the background processor
   const processor = startBackgroundProcessor(io);
+  
+  // Register API routes
+  app.use('/api/agents', agentRoutes(io, processor));
+  app.use('/api/plans', planRoutes(io));
+  app.use('/api/logs', logRoutes());
   
   // Store the processor reference in the app for cleanup
   (app as any).backgroundProcessor = processor;

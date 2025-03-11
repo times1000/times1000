@@ -4,9 +4,10 @@ import db from '../../db';
 import { logOperation } from '../services/logging-service';
 import { Server } from 'socket.io';
 import { Agent } from '../../core/Agent';
-import { AgentCreationRequest } from '../../types/agent';
+import { AgentCreationRequest, AgentStatus } from '../../types/agent';
+import { BackgroundProcessor } from '../../background-processor';
 
-export default function(io: Server) {
+export default function(io: Server, backgroundProcessor?: BackgroundProcessor) {
   const router = express.Router();
 
   // Get all agents
@@ -45,24 +46,8 @@ export default function(io: Server) {
         return res.status(400).json({ error: 'Command is required' });
       }
       
-      // Create a temporary agent instance for plan generation
+      // Create a new agent ID
       const agentId = uuidv4();
-      const tempAgent = new Agent(agentId);
-      
-      // Set optional properties
-      if (initialCapabilities && Array.isArray(initialCapabilities)) {
-        tempAgent.addCapabilities(initialCapabilities);
-      }
-      
-      if (personalityProfile) {
-        tempAgent.setPersonalityProfile(personalityProfile);
-      }
-      
-      if (settings && typeof settings === 'object') {
-        Object.entries(settings).forEach(([key, value]) => {
-          tempAgent.setSetting(key, value);
-        });
-      }
       
       // Log the agent creation attempt
       await logOperation('agent_creation_started', {
@@ -71,48 +56,95 @@ export default function(io: Server) {
         hasPersonalityProfile: !!personalityProfile
       });
       
-      // Generate a plan and get suggested name/description
-      const { plan, nameAndDescription } = await tempAgent.createWithCommand(command);
-      
-      // Create the agent in the database with the suggested name and description
+      // Create initial agent in database with temporary info
       const newAgent = {
         id: agentId,
-        name: nameAndDescription.name,
-        description: nameAndDescription.description,
-        status: 'awaiting_approval',
-        capabilities: tempAgent.capabilities,
-        settings: tempAgent.settings,
-        personalityProfile: tempAgent.personalityProfile
+        name: `Agent for: ${command.substring(0, 30)}${command.length > 30 ? '...' : ''}`,
+        description: `Processing command: ${command}`,
+        status: AgentStatus.PLAN_PENDING,
+        capabilities: initialCapabilities || [],
+        settings: settings || {},
+        personalityProfile: personalityProfile || ''
       };
       
       const createdAgent = await db.agents.createAgent(newAgent);
       
-      // Save the plan to the database
-      const createdPlan = await db.plans.createPlan(plan);
-      
-      // Log successful creation
-      await logOperation('agent_created', {
-        agentId,
-        planId: createdPlan.id,
-        stepCount: createdPlan.steps.length
-      });
-      
-      // Emit socket events
+      // Emit socket event for created agent
       io.emit('agent:created', createdAgent);
-      io.emit('plan:created', {
-        agentId,
-        planId: createdPlan.id
-      });
       
-      res.status(201).json({
-        agent: createdAgent,
-        plan: {
-          planId: createdPlan.id,
-          status: createdPlan.status,
-          description: createdPlan.description,
-          steps: createdPlan.steps
+      // Queue the plan creation in the background
+      if (backgroundProcessor) {
+        // Use background processor to queue plan generation
+        backgroundProcessor.queuePlanGeneration({
+          agentId,
+          command,
+          isInitialPlan: true,
+          requestId: uuidv4()
+        });
+        
+        res.status(201).json({
+          agent: createdAgent,
+          message: 'Agent created. Plan generation has been queued and will be available shortly.'
+        });
+      } else {
+        // Fallback if background processor is not available
+        // Create a temporary agent instance for direct plan generation
+        const tempAgent = new Agent(agentId);
+        
+        // Set optional properties
+        if (initialCapabilities && Array.isArray(initialCapabilities)) {
+          tempAgent.addCapabilities(initialCapabilities);
         }
-      });
+        
+        if (personalityProfile) {
+          tempAgent.setPersonalityProfile(personalityProfile);
+        }
+        
+        if (settings && typeof settings === 'object') {
+          Object.entries(settings).forEach(([key, value]) => {
+            tempAgent.setSetting(key, value);
+          });
+        }
+        
+        // Generate plan synchronously (legacy mode)
+        const { plan, nameAndDescription } = await tempAgent.createWithCommand(command);
+        
+        // Update the agent in the database with the suggested name and description
+        const updates = {
+          name: nameAndDescription.name,
+          description: nameAndDescription.description,
+          status: AgentStatus.AWAITING_APPROVAL
+        };
+        
+        await db.agents.updateAgent(agentId, updates);
+        
+        // Save the plan to the database
+        const createdPlan = await db.plans.createPlan(plan);
+        
+        // Log successful creation
+        await logOperation('agent_created_legacy', {
+          agentId,
+          planId: createdPlan.id,
+          stepCount: createdPlan.steps.length
+        });
+        
+        // Emit socket events
+        io.emit('agent:updated', { ...createdAgent, ...updates });
+        io.emit('plan:created', {
+          agentId,
+          planId: createdPlan.id
+        });
+        
+        res.status(201).json({
+          agent: { ...createdAgent, ...updates },
+          plan: {
+            planId: createdPlan.id,
+            status: createdPlan.status,
+            description: createdPlan.description,
+            steps: createdPlan.steps
+          }
+        });
+      }
     } catch (error) {
       console.error('Error creating agent:', error);
       res.status(500).json({ error: 'Internal server error while creating agent' });
@@ -251,68 +283,107 @@ export default function(io: Server) {
         command
       });
       
-      // Create an Agent instance
-      const agentInstance = new Agent(agent.id, agent.name, agent.description);
+      // Update agent status to plan pending
+      await db.agents.updateAgent(agent.id, { status: AgentStatus.PLAN_PENDING });
       
-      // Set capabilities if they exist
-      if (agent.capabilities && Array.isArray(agent.capabilities)) {
-        agentInstance.addCapabilities(agent.capabilities);
-      }
-      
-      // Generate a plan with potential name/description update
-      const generatedPlan = await agentInstance.receiveCommand(command);
-      
-      // Save the plan to the database
-      const createdPlan = await db.plans.createPlan(generatedPlan);
-      
-      // Update agent status and possibly name/description if they changed
-      const updates: Record<string, any> = { status: 'awaiting_approval' };
-      
-      // If name or description changed, update them
-      if (agentInstance.name !== agent.name) {
-        updates.name = agentInstance.name;
-      }
-      
-      if (agentInstance.description !== agent.description) {
-        updates.description = agentInstance.description;
-      }
-      
-      await db.agents.updateAgent(agent.id, updates);
-      
-      // Log plan creation
-      await logOperation('plan_created', {
-        agentId: agent.id,
-        planId: createdPlan.id,
-        stepCount: createdPlan.steps.length,
-        nameUpdated: 'name' in updates,
-        descriptionUpdated: 'description' in updates
+      // Emit status update
+      io.emit('agent:updated', {
+        ...agent,
+        status: AgentStatus.PLAN_PENDING
       });
       
-      // Emit socket events
-      io.emit('plan:created', {
-        agentId: agent.id,
-        planId: createdPlan.id
-      });
-      
-      // If name or description changed, emit update event
-      if ('name' in updates || 'description' in updates) {
-        io.emit('agent:updated', {
-          ...agent,
-          ...updates
+      if (backgroundProcessor) {
+        // Queue plan generation in the background
+        backgroundProcessor.queuePlanGeneration({
+          agentId: agent.id,
+          command,
+          isInitialPlan: false,
+          requestId: uuidv4()
+        });
+        
+        res.json({
+          agentId: agent.id,
+          message: 'Command received. Plan generation has been queued and will be available shortly.'
+        });
+      } else {
+        // Fallback if background processor is not available
+        // Create an Agent instance for direct plan generation
+        const agentInstance = new Agent(agent.id, agent.name, agent.description);
+        
+        // Set capabilities if they exist
+        if (agent.capabilities && Array.isArray(agent.capabilities)) {
+          agentInstance.addCapabilities(agent.capabilities);
+        }
+        
+        // Generate a plan with potential name/description update (legacy synchronous mode)
+        const generatedPlan = await agentInstance.receiveCommand(command);
+        
+        // Save the plan to the database
+        const createdPlan = await db.plans.createPlan(generatedPlan);
+        
+        // Update agent status and possibly name/description if they changed
+        const updates: Record<string, any> = { status: AgentStatus.AWAITING_APPROVAL };
+        
+        // If name or description changed, update them
+        if (agentInstance.name !== agent.name) {
+          updates.name = agentInstance.name;
+        }
+        
+        if (agentInstance.description !== agent.description) {
+          updates.description = agentInstance.description;
+        }
+        
+        await db.agents.updateAgent(agent.id, updates);
+        
+        // Log plan creation
+        await logOperation('plan_created_legacy', {
+          agentId: agent.id,
+          planId: createdPlan.id,
+          stepCount: createdPlan.steps.length,
+          nameUpdated: 'name' in updates,
+          descriptionUpdated: 'description' in updates
+        });
+        
+        // Emit socket events
+        io.emit('plan:created', {
+          agentId: agent.id,
+          planId: createdPlan.id
+        });
+        
+        // If name or description changed, emit update event
+        if ('name' in updates || 'description' in updates) {
+          io.emit('agent:updated', {
+            ...agent,
+            ...updates
+          });
+        }
+        
+        res.json({
+          planId: createdPlan.id,
+          agentId: agent.id,
+          status: createdPlan.status,
+          description: createdPlan.description,
+          steps: createdPlan.steps,
+          nameUpdated: 'name' in updates ? updates.name : undefined,
+          descriptionUpdated: 'description' in updates ? updates.description : undefined
         });
       }
-      
-      res.json({
-        planId: createdPlan.id,
-        agentId: agent.id,
-        status: createdPlan.status,
-        description: createdPlan.description,
-        steps: createdPlan.steps,
-        nameUpdated: 'name' in updates ? updates.name : undefined,
-        descriptionUpdated: 'description' in updates ? updates.description : undefined
-      });
     } catch (error) {
       console.error('Error creating plan:', error);
+      
+      // Set agent status back to idle on error
+      try {
+        await db.agents.updateAgent(req.params.id, { status: AgentStatus.ERROR });
+        
+        // Emit error status update
+        io.emit('agent:updated', {
+          id: req.params.id,
+          status: AgentStatus.ERROR
+        });
+      } catch (updateError) {
+        console.error('Error updating agent status after failure:', updateError);
+      }
+      
       res.status(500).json({ error: 'Internal server error while creating plan' });
     }
   });

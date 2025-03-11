@@ -1,6 +1,7 @@
 export enum AgentStatus {
   IDLE = 'idle',
   PLANNING = 'planning',
+  PLAN_PENDING = 'plan_pending',
   AWAITING_APPROVAL = 'awaiting_approval',
   EXECUTING = 'executing',
   ERROR = 'error'
@@ -40,4 +41,11 @@ export interface AgentCreationRequest {
   initialCapabilities?: string[];
   personalityProfile?: string;
   settings?: Record<string, any>;
+}
+
+export interface PlanGenerationQueueItem {
+  agentId: string;
+  command: string;
+  isInitialPlan: boolean;
+  requestId: string;
 }

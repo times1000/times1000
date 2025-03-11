@@ -1,10 +1,11 @@
 import db from './db';
 import { logOperation } from './api/services/logging-service';
-import { executeAiProcessing } from './api/services/plan-service';
+import { executeAiProcessing, generatePlan } from './api/services/plan-service';
 import { Server } from 'socket.io';
-import { AgentStatus } from './types/agent';
+import { AgentStatus, PlanGenerationQueueItem } from './types/agent';
 import { RowDataPacket } from 'mysql2';
 import { Plan } from './types/db';
+import { v4 as uuidv4 } from 'uuid';
 
 /**
  * Background processor that checks for agents with plans awaiting approval
@@ -15,6 +16,7 @@ export class BackgroundProcessor {
   private running: boolean = false;
   private pollInterval: number = 5000; // 5 seconds
   private intervalId: NodeJS.Timeout | null = null;
+  private planGenerationQueue: PlanGenerationQueueItem[] = [];
 
   constructor(io: Server) {
     this.io = io;
@@ -94,9 +96,131 @@ export class BackgroundProcessor {
 
       // Process agents with awaiting_approval status
       await this.processAwaitingApprovalAgents();
+      
+      // Process plan generation queue
+      await this.processPlanGenerationQueue();
     } catch (error) {
       console.error('Error in background processor:', error);
       logOperation('background_processor_error', {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+  
+  /**
+   * Queue a plan generation request for background processing
+   */
+  public queuePlanGeneration(item: PlanGenerationQueueItem): string {
+    // Generate a request ID if not provided
+    const requestId = item.requestId || uuidv4();
+    const queueItem = { ...item, requestId };
+    
+    // Add to queue
+    this.planGenerationQueue.push(queueItem);
+    
+    console.log(`Queued plan generation for agent ${item.agentId} with request ID ${requestId}`);
+    
+    // Log the operation
+    logOperation('plan_generation_queued', {
+      agentId: item.agentId,
+      requestId,
+      isInitialPlan: item.isInitialPlan
+    });
+    
+    return requestId;
+  }
+  
+  /**
+   * Process the plan generation queue
+   */
+  private async processPlanGenerationQueue(): Promise<void> {
+    if (this.planGenerationQueue.length === 0) {
+      return;
+    }
+    
+    // Take the first item from the queue
+    const item = this.planGenerationQueue.shift();
+    if (!item) return;
+    
+    try {
+      console.log(`Processing plan generation for agent ${item.agentId}`);
+      
+      // Get agent information
+      const agent = await db.agents.getAgentById(item.agentId);
+      if (!agent) {
+        console.error(`Agent ${item.agentId} not found for plan generation`);
+        return;
+      }
+      
+      // Log the operation
+      await logOperation('plan_generation_started', {
+        agentId: item.agentId,
+        requestId: item.requestId,
+        isInitialPlan: item.isInitialPlan
+      });
+      
+      // Generate the plan asynchronously
+      const { plan, agentNameAndDescription } = await generatePlan(agent, item.command, item.isInitialPlan);
+      
+      // Save the plan to the database
+      const createdPlan = await db.plans.createPlan(plan);
+      
+      // Update agent if necessary
+      const updates: Record<string, any> = { status: AgentStatus.AWAITING_APPROVAL };
+      
+      // If this is an initial plan or agent metadata was updated, update the agent
+      if (agentNameAndDescription) {
+        if (item.isInitialPlan || agentNameAndDescription.name !== agent.name) {
+          updates.name = agentNameAndDescription.name;
+        }
+        
+        if (item.isInitialPlan || agentNameAndDescription.description !== agent.description) {
+          updates.description = agentNameAndDescription.description;
+        }
+      }
+      
+      await db.agents.updateAgent(item.agentId, updates);
+      
+      // Log plan creation
+      await logOperation('plan_created_background', {
+        agentId: item.agentId,
+        planId: createdPlan.id,
+        requestId: item.requestId,
+        stepCount: createdPlan.steps.length,
+        nameUpdated: 'name' in updates && updates.name !== agent.name,
+        descriptionUpdated: 'description' in updates && updates.description !== agent.description
+      });
+      
+      // Emit socket events
+      this.io.emit('plan:created', {
+        agentId: item.agentId,
+        planId: createdPlan.id
+      });
+      
+      // If name or description changed, emit update event
+      if ('name' in updates || 'description' in updates) {
+        this.io.emit('agent:updated', {
+          ...agent,
+          ...updates
+        });
+      }
+      
+    } catch (error) {
+      console.error(`Error processing plan generation for agent ${item.agentId}:`, error);
+      
+      // Update agent status to error
+      await db.agents.updateAgent(item.agentId, { status: AgentStatus.ERROR });
+      
+      // Log the error
+      await logOperation('plan_generation_error', {
+        agentId: item.agentId,
+        requestId: item.requestId,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      
+      // Emit socket event for error
+      this.io.emit('agent:error', {
+        agentId: item.agentId,
         error: error instanceof Error ? error.message : 'Unknown error'
       });
     }
