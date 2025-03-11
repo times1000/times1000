@@ -26,13 +26,62 @@ if (!hasOpenAIKey && !hasAnthropicKey) {
 
 // Test database connection on startup and force reload
 console.log('Testing database connection and ensuring fresh connection...');
-db.default.testConnection();
+
+// Add a delay to allow MySQL to fully initialize
+const waitForDatabase = () => {
+  return new Promise((resolve) => {
+    // Don't try to close the pool, just wait for the database to be available
+    const maxAttempts = 30; // 60 seconds total wait time
+    let attempts = 0;
+    
+    const attempt = () => {
+      attempts++;
+      try {
+        console.log(`Attempting database connection (${attempts}/${maxAttempts})...`);
+        db.default.testConnection()
+          .then(() => {
+            console.log('Database connection successful!');
+            resolve();
+          })
+          .catch(err => {
+            if (attempts >= maxAttempts) {
+              console.log('Maximum database connection attempts reached, continuing anyway...');
+              resolve(); // Continue server startup even without database
+            } else {
+              console.log('Database connection failed, retrying in 2 seconds...', err.message);
+              setTimeout(attempt, 2000);
+            }
+          });
+      } catch (err) {
+        if (attempts >= maxAttempts) {
+          console.log('Maximum database connection attempts reached, continuing anyway...');
+          resolve(); // Continue server startup even without database
+        } else {
+          console.log('Database connection error, retrying in 2 seconds...', err.message);
+          setTimeout(attempt, 2000);
+        }
+      }
+    };
+    
+    attempt();
+  });
+};
+
+// Wait for database before proceeding with server setup
+waitForDatabase().catch(err => {
+  console.error('Final database connection error:', err);
+});
 
 // Execute the newest migration for system logs
 const fs = require('fs');
-const path = require('path');
 
 const runMigration = async (filename) => {
+  // Make sure we have a database connection before running migrations
+  if (!db.pool) {
+    console.log('No database pool available, skipping migration');
+    return;
+  }
+  
   try {
     console.log(`Executing migration: ${filename}`);
     const migrationPath = path.join(__dirname, 'init-sql', filename);
@@ -43,7 +92,16 @@ const runMigration = async (filename) => {
     
     for (const statement of statements) {
       if (statement.trim()) {
-        await db.pool.query(statement);
+        try {
+          await db.pool.query(statement);
+        } catch (statementError) {
+          // Log the error but continue with other statements
+          console.log(`Error executing statement: ${statementError.message}`);
+          // If it's a "table already exists" error, we can safely ignore it
+          if (statementError.code !== 'ER_TABLE_EXISTS_ERROR') {
+            throw statementError;
+          }
+        }
       }
     }
     
@@ -54,8 +112,15 @@ const runMigration = async (filename) => {
   }
 };
 
-// Run our new separate logs migration
-runMigration('04-separate-logs-migration.sql');
+// Run our new separate logs migration after successful database connection
+waitForDatabase().then(() => {
+  try {
+    console.log('Database connected, running migrations...');
+    runMigration('04-separate-logs-migration.sql');
+  } catch (error) {
+    console.warn('Migration could not be run at startup, will try again later:', error.message);
+  }
+});
 
 // Export db pool for shutdown handling
 exports.pool = db.pool;
@@ -99,11 +164,17 @@ io.engine.on('connection_error', (err) => {
   console.error('Socket.io connection error:', err);
 });
 
-// Start the server
+// Start the server after database connection
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`*1000 API server running on port ${PORT}`);
-  console.log(`Access the app via the Vite dev server at http://localhost:5173`);
+
+// Wait for database before starting the server
+waitForDatabase().then(() => {
+  server.listen(PORT, () => {
+    console.log(`*1000 API server running on port ${PORT}`);
+    console.log(`Access the app via the Vite dev server at http://localhost:5173`);
+  });
+}).catch(err => {
+  console.error('Failed to start server:', err);
 });
 
 // Graceful shutdown
