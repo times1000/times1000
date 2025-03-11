@@ -1,8 +1,9 @@
 # CLAUDE.md - AI Assistant Guide
 
 ## Build/Test Commands
-- Build: `npm run build`
-- Dev: `npm run dev`
+- Start services: `docker-compose up`
+- Stop services: `docker-compose down`
+- Rebuild and restart after changes: `docker-compose down && docker-compose up`
 - Lint: `npm run lint`
 - Typecheck: `npm run typecheck`
 - Test all: `npm test`
@@ -22,6 +23,7 @@
 ## Workflow Instructions
 - Always run type check (`npm run typecheck`) after making code changes
 - Fix ALL TypeScript errors after making changes, whether directly related to your changes or not
+- Restart Docker containers after changes and verify functionality (`docker-compose down && docker-compose up`)
 - Automatically commit changes to git after completing tasks
 - Keep commit messages short and concise - no approval needed
 - Push changes to the repository after committing
