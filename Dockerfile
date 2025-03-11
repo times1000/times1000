@@ -8,6 +8,9 @@ COPY package*.json ./
 # Install dependencies
 RUN npm install
 
+# Explicitly install Anthropic SDK
+RUN npm install @anthropic-ai/sdk@latest
+
 # Expose the port
 EXPOSE 3000
 
