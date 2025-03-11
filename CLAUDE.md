@@ -19,6 +19,12 @@
 - Comments: Document "why" not "what" (code should be self-explanatory)
 - Keep functions small and focused on a single responsibility
 
+## Workflow Instructions
+- Always run type check (`npm run typecheck`) after making code changes
+- Automatically commit changes to git after completing tasks
+- Keep commit messages short and concise - no approval needed
+- Push changes to the repository after committing
+
 ## Codebase Improvement Plan
 
 ### Critical Fixes
