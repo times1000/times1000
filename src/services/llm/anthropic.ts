@@ -1,12 +1,20 @@
-import Anthropic from '@anthropic-ai/sdk';
+// Mock Anthropic client for development
+// TODO: Uncomment when @anthropic-ai/sdk is properly installed
+// import Anthropic from '@anthropic-ai/sdk';
 import { LLMMessage, LLMChatCompletionResponse, ModelConfig, LLMEmbeddingResponse, RequestContext } from './types';
 import { logLLMRequest } from './logger';
 import { calculateCost } from './pricing';
 
-// Initialize Anthropic client with fallback to dummy key for development
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || 'sk-dummy-key-for-development',
-});
+// Create a mock client for development
+const client = {
+  messages: {
+    create: async (_options: any) => ({
+      content: [{ text: "This is a mock response from Claude" }],
+      usage: { input_tokens: 100, output_tokens: 50 },
+      stop_reason: "end_turn"
+    })
+  }
+};
 
 /**
  * Generate a chat completion using Anthropic Claude
