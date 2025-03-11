@@ -25,6 +25,30 @@
 - Keep commit messages short and concise - no approval needed
 - Push changes to the repository after committing
 
+## Type Issue Fixes
+When encountering the error "Type '(prevPlan: Plan) => {...}' is not assignable to parameter of type 'SetStateAction<Plan>'" in AgentDetails.tsx:
+
+1. Fix the `step:completed` event handler in AgentDetails.tsx (line 155):
+```typescript
+socket.on('step:completed', (data) => {
+  if (data.agentId === agentId) {
+    setCurrentPlan(prevPlan => {
+      if (!prevPlan) return null;
+      
+      // Update completed step with result
+      const updatedSteps = prevPlan.steps.map(step => 
+        step.id === data.stepId ? { 
+          ...step, 
+          status: 'completed' as StepStatus, // Add type assertion here
+          result: data.result 
+        } : step
+      );
+      
+      return { ...prevPlan, steps: updatedSteps };
+    });
+  }
+});
+
 ## Codebase Improvement Plan
 
 ### Critical Fixes

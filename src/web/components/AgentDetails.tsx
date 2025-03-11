@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Socket } from 'socket.io-client';
 import { AgentStatus, AgentData } from '../../types/agent';
 import { Plan } from '../../types/db';
+import { StepStatus, PlanStatus } from '../../core/Plan';
 import PlanViewer from './PlanViewer';
 import LogViewer from './LogViewer';
 
@@ -69,7 +70,7 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
     socket.on('plan:approved', (data) => {
       if (data.agentId === agentId) {
         // Update plan status directly
-        setCurrentPlan(prev => prev ? { ...prev, status: 'approved' } : null);
+        setCurrentPlan(prev => prev ? { ...prev, status: 'approved' as PlanStatus } : null);
         // Update agent status
         setAgent(prev => prev ? { ...prev, status: AgentStatus.EXECUTING } : prev);
       }
@@ -142,7 +143,7 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
           
           // Update the specific step's status
           const updatedSteps = prevPlan.steps.map(step => 
-            step.id === data.stepId ? { ...step, status: data.status } : step
+            step.id === data.stepId ? { ...step, status: data.status as StepStatus } : step
           );
           
           return { ...prevPlan, steps: updatedSteps };
@@ -159,7 +160,7 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
           const updatedSteps = prevPlan.steps.map(step => 
             step.id === data.stepId ? { 
               ...step, 
-              status: 'completed',
+              status: 'completed' as StepStatus,
               result: data.result 
             } : step
           );
@@ -175,7 +176,7 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
           if (!prevPlan) return null;
           return { 
             ...prevPlan, 
-            status: 'completed',
+            status: 'completed' as PlanStatus,
             hasFollowUp: data.hasFollowUp,
             followUpSuggestions: data.followUpSuggestions
           };
@@ -187,7 +188,7 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
       if (data.agentId === agentId) {
         setCurrentPlan(prevPlan => {
           if (!prevPlan) return null;
-          return { ...prevPlan, status: 'failed' };
+          return { ...prevPlan, status: 'failed' as PlanStatus };
         });
       }
     });
@@ -278,7 +279,7 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
       }
       
       // Optimistic update - the socket will provide real data if needed
-      setCurrentPlan(prev => prev ? { ...prev, status: 'approved' } : null);
+      setCurrentPlan(prev => prev ? { ...prev, status: 'approved' as PlanStatus } : null);
       setAgent(prev => prev ? { ...prev, status: AgentStatus.EXECUTING } : prev);
     } catch (err) {
       console.error('Error approving plan:', err);
