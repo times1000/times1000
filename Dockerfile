@@ -11,6 +11,15 @@ RUN npm install
 # Explicitly install Anthropic SDK
 RUN npm install @anthropic-ai/sdk@latest
 
+# Install Claude Code CLI
+RUN npm install -g @anthropic-ai/claude-code
+
+# Install additional tools for code execution
+RUN apk add --no-cache python3 py3-pip curl git
+
+# Create directory for generated code
+RUN mkdir -p /app/generated-code && chmod 777 /app/generated-code
+
 # Expose the port
 EXPOSE 3000
 

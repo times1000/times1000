@@ -1,22 +1,52 @@
 import * as openai from './openai';
 import * as anthropic from './anthropic';
-import { LLMMessage, LLMChatCompletionResponse, ModelConfig, LLMEmbeddingResponse, RequestContext } from './types';
+import { 
+  LLMMessage, 
+  LLMChatCompletionResponse, 
+  ModelConfig, 
+  LLMEmbeddingResponse, 
+  RequestContext,
+  ExecutionOptions,
+  ExecutionStrategy,
+  ToolFunction
+} from './types';
 import { logLLMRequest } from './logger';
 import { calculateCost } from './pricing';
+import { 
+  generateAndExecuteCode, 
+  isClaudeCodeAvailable,
+  getCodeExecutionPath,
+  getAvailableMcpServices
+} from './claude-code-execution';
 
 // Determine default providers
 const defaultChatProvider = process.env.DEFAULT_LLM_PROVIDER?.toLowerCase() || 'openai';
 const defaultEmbeddingProvider = process.env.DEFAULT_EMBEDDING_PROVIDER?.toLowerCase() || 'openai';
+const enableCodeExecution = process.env.ENABLE_CODE_EXECUTION === 'true';
+
+// Check Claude Code availability during startup
+let claudeCodeAvailable = false;
+if (enableCodeExecution) {
+  claudeCodeAvailable = isClaudeCodeAvailable();
+  console.log(`Claude Code execution ${claudeCodeAvailable ? 'is' : 'is not'} available`);
+  
+  if (claudeCodeAvailable) {
+    console.log(`Code execution path: ${getCodeExecutionPath()}`);
+    console.log(`Available MCP services: ${getAvailableMcpServices().join(', ')}`);
+  }
+}
 
 /**
  * Generate a chat completion using the configured provider
+ * Now supports tool execution via Claude Code
  */
 export async function chatCompletion(
   messages: LLMMessage[],
-  config: ModelConfig & { provider?: string } = { model: 'gpt-4o' },
+  config: ExecutionOptions = { model: 'gpt-4o' },
   context: RequestContext = {}
 ): Promise<LLMChatCompletionResponse> {
-  // Determine which provider to use
+  // Determine execution strategy and provider
+  const executionStrategy = shouldUseToolExecution(config) ? 'tools' : 'standard';
   const provider = config.provider?.toLowerCase() || defaultChatProvider;
   
   // Check if environment variables are properly set
@@ -28,7 +58,60 @@ export async function chatCompletion(
     throw new Error('ANTHROPIC_API_KEY environment variable is not set. Please configure the API key in environment variables.');
   }
   
-  // Route to appropriate provider
+  // If using code execution and it's enabled and available
+  if (executionStrategy === 'tools' && enableCodeExecution && claudeCodeAvailable) {
+    console.log('Using Claude Code CLI for code execution');
+    
+    try {
+      // Generate and execute code with Claude Code CLI
+      const { result, toolUsage } = await generateAndExecuteCode(
+        messages,
+        {
+          ...context,
+          executionStrategy: 'code_execution'
+        }
+      );
+      
+      // Log the code execution
+      await logLLMRequest({
+        provider: 'claude-code',
+        model: 'claude-3-opus', // Assuming Claude Code uses opus
+        operation: context.operation || 'code_execution',
+        prompt: JSON.stringify(messages),
+        response: result,
+        tokenUsage: {
+          promptTokens: 0, // These are not available from Claude Code CLI
+          completionTokens: 0,
+          totalTokens: 0
+        },
+        costUsd: 0, // Would need a different pricing model
+        durationMs: 0, // Not tracked by CLI
+        context: {
+          ...context,
+          executionMode: 'code_execution'
+        },
+        toolUsage
+      });
+      
+      // Return the response in our standard format
+      return {
+        content: result,
+        model: 'claude-3-opus',
+        tokenUsage: {
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0
+        },
+        finishReason: 'stop',
+        toolUsage
+      };
+    } catch (error) {
+      console.error('Claude Code execution failed, falling back to standard LLM:', error);
+      // Will fall through to standard execution
+    }
+  }
+  
+  // Standard execution path
   switch (provider) {
     case 'anthropic':
     case 'claude':
@@ -46,6 +129,24 @@ export async function chatCompletion(
       }
       return openai.chatCompletion(messages, config, context);
   }
+}
+
+/**
+ * Determine if we should use tool execution based on config and environment
+ */
+function shouldUseToolExecution(config: ExecutionOptions): boolean {
+  // If explicitly specified in config, use that
+  if (config.executionStrategy === 'tools') {
+    return true;
+  }
+  
+  // If tools are provided, use tool execution
+  if (config.tools && config.tools.length > 0) {
+    return true;
+  }
+  
+  // Default to environment setting
+  return enableCodeExecution && claudeCodeAvailable;
 }
 
 /**
@@ -125,8 +226,57 @@ export async function extractInfo<T = any>(
   }
 }
 
+/**
+ * Execute code generation and execution with Claude Code CLI
+ */
+export async function executeCodeWithClaudeCode(
+  messages: LLMMessage[],
+  context: RequestContext = {}
+): Promise<string> {
+  if (!enableCodeExecution || !claudeCodeAvailable) {
+    throw new Error('Code execution is disabled or Claude Code is not available');
+  }
+  
+  try {
+    // Execute the code generation and execution
+    const { result } = await generateAndExecuteCode(messages, context);
+    return result;
+  } catch (error) {
+    console.error('Error executing code with Claude Code:', error);
+    throw new Error(`Code execution failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+/**
+ * Check if Claude Code is available for code execution
+ */
+export function isCodeExecutionAvailable(): boolean {
+  return enableCodeExecution && claudeCodeAvailable;
+}
+
+/**
+ * Get available MCP services for code execution
+ */
+export function getAvailableMcpServicesForCode(): string[] {
+  if (!enableCodeExecution || !claudeCodeAvailable) {
+    return [];
+  }
+  
+  return getAvailableMcpServices();
+}
+
 // Re-export helper functions so they can be used directly
 export { logLLMRequest, calculateCost };
 
 // Export types for consumers
-export type { LLMMessage, LLMChatCompletionResponse, ModelConfig, LLMEmbeddingResponse, RequestContext };
+export type { 
+  LLMMessage, 
+  LLMChatCompletionResponse, 
+  ModelConfig, 
+  LLMEmbeddingResponse, 
+  RequestContext,
+  ExecutionOptions,
+  ExecutionStrategy,
+  ToolFunction,
+  ToolCallResult
+};

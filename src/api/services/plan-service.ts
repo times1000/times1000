@@ -617,18 +617,35 @@ Please execute this step and provide a detailed, thoughtful response as if you w
       { role: 'user' as const, content: prompt }
     ];
     
+    // Determine if we should use code execution
+    const shouldUseCodeExecution = 
+      process.env.ENABLE_CODE_EXECUTION === 'true' && 
+      llm.isCodeExecutionAvailable();
+      
+    // Get available MCP services for code prompt
+    const availableMcpServices = llm.getAvailableMcpServicesForCode();
+    const mcpServicesString = availableMcpServices.length > 0 ? 
+      `\nYou have access to these MCP services: ${availableMcpServices.join(', ')}` : '';
+    
+    // Update the system message with code execution context if available
+    if (shouldUseCodeExecution) {
+      messages[0].content += `\nYou can write and execute code to complete this step.${mcpServicesString}`;
+    }
+    
     const response = await llm.chatCompletion(
       messages,
       {
         model,
         provider,
         temperature: 0.7,
-        maxTokens: 1500
+        maxTokens: 1500,
+        executionStrategy: shouldUseCodeExecution ? 'tools' : 'standard'
       },
       {
         operation: 'execute_step',
         agentId: plan.agentId,
-        planId: plan.id
+        planId: plan.id,
+        stepNumber: String(stepNumber)
       }
     );
     
@@ -672,13 +689,19 @@ Respond with a JSON array of follow-up suggestions, where each item is a clear, 
 `;
 
     // Extract info using our abstracted LLM service
+    // Determine if we should use code execution for follow-up generation
+    const shouldUseCodeExecution = 
+      process.env.ENABLE_CODE_EXECUTION === 'true' && 
+      llm.isCodeExecutionAvailable();
+    
     const parsed = await llm.extractInfo(
       prompt,
       "Generate follow-up suggestions after a completed task", 
       { 
         model,
         provider,
-        temperature: 0.7
+        temperature: 0.7,
+        executionStrategy: shouldUseCodeExecution ? 'tools' : 'standard'
       },
       {
         operation: 'follow_up_generation',

@@ -2,7 +2,7 @@ import db from '../../db';
 // Force reload db to ensure fresh connection
 db.testConnection();
 import { v4 as uuidv4 } from 'uuid';
-import { LLMMessage, TokenUsage, RequestContext } from './types';
+import { LLMMessage, TokenUsage, RequestContext, ToolUsage } from './types';
 
 /**
  * LLM Request Logger - Logs all LLM API calls to database
@@ -18,7 +18,8 @@ export async function logLLMRequest({
   durationMs,
   status = 'completed',
   error = null,
-  context = {}
+  context = {},
+  toolUsage
 }: {
   provider: string;
   model: string;
@@ -31,6 +32,7 @@ export async function logLLMRequest({
   status?: string;
   error?: string | null;
   context?: RequestContext;
+  toolUsage?: ToolUsage;
 }): Promise<void> {
   try {
     const id = uuidv4();
@@ -54,7 +56,11 @@ export async function logLLMRequest({
       costUsd,
       status,
       agentId: context.agentId,
-      planId: context.planId
+      planId: context.planId,
+      ...(toolUsage ? {
+        toolCalls: toolUsage.toolCalls,
+        toolRevenue: toolUsage.toolRevenue
+      } : {})
     });
     
     // Ensure text lengths are appropriate for database

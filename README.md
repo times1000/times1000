@@ -63,19 +63,29 @@ npm run dev
 5. Explore follow-up suggestions for continued assistance
 6. Each new command may update the agent's name and description to reflect its evolving purpose
 
-## OpenAI Integration
+## AI Integration
 
-This framework leverages OpenAI's GPT models to:
+This framework integrates with leading AI models for intelligent capabilities:
 
-1. Generate detailed, context-aware execution plans
-2. Create appropriate agent names and descriptions
-3. Execute plan steps with intelligent reasoning
-4. Provide thoughtful follow-up suggestions
-5. Adapt to different domains through configurable capabilities
+### OpenAI Integration
+- Generate detailed, context-aware execution plans with GPT-4o
+- Execute plan steps with intelligent reasoning
+- Provide thoughtful follow-up suggestions
 
 To use your own OpenAI API key:
 1. Get an API key from [OpenAI](https://platform.openai.com/)
 2. Add it to your `.env` file as `OPENAI_API_KEY=your_key_here`
+
+### Claude & Cloud Code Integration
+- Use Claude models through Anthropic's API
+- Execute tools in local Docker container with Claude Code
+- Track tool usage and revenue
+- Access to file system, memory, web browsing, and GitHub tools
+
+To use Claude and Cloud Code:
+1. Get an API key from [Anthropic](https://console.anthropic.com/)
+2. Add it to your `.env` file as `ANTHROPIC_API_KEY=your_key_here`
+3. Set `ENABLE_TOOL_EXECUTION=true` to enable tool execution
 
 ## Tech Stack
 
@@ -83,7 +93,7 @@ To use your own OpenAI API key:
 - Backend: Node.js/Express
 - Database: MySQL
 - Real-time: Socket.io
-- AI: OpenAI API
+- AI: OpenAI API, Anthropic/Claude API, Claude Code
 - Development: Docker with hot reloading
 
 ## API Documentation
@@ -130,11 +140,15 @@ This project has been updated to use a single unified agent model instead of spe
 
 ### Migrating from Previous Versions
 
-If you're updating from a previous version that used specialized agent types:
+If you're updating from a previous version:
 
-1. Run the database migration script:
+1. Run the database migration scripts:
    ```
+   # For unified agent architecture (if updating from pre-unified version)
    mysql -u username -p database_name < init-sql/02-unified-agent-migration.sql
+   
+   # For tool execution support
+   mysql -u username -p database_name < init-sql/03-execution-mode-migration.sql
    ```
 
 2. Remove the specialized agent files (optional but recommended):

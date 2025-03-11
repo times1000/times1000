@@ -19,6 +19,8 @@ export interface PlanRowData extends RowDataPacket {
   createdAt: Date;
   updatedAt: Date;
   follow_up_suggestions?: string | any[];
+  execution_mode?: string;
+  tool_usage?: number;
 }
 
 // Define interfaces for plan and step structures
@@ -35,6 +37,8 @@ export interface Plan {
   updatedAt?: Date;
   hasFollowUp?: boolean;
   followUpSuggestions?: string[];
+  executionMode?: 'standard' | 'tools';
+  toolUsage?: number;
   // Include methods from core Plan class
   addStep?: (step: PlanStep) => void;
   removeStep?: (stepId: string) => void;

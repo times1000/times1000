@@ -21,10 +21,18 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - DEFAULT_LLM_PROVIDER=${DEFAULT_LLM_PROVIDER:-openai}
+      - ENABLE_CODE_EXECUTION=${ENABLE_CODE_EXECUTION:-true}
+      - CODE_EXECUTION_PATH=/app/generated-code
+      - MCP_MEMORY_URL=${MCP_MEMORY_URL:-http://host.docker.internal:3002}
+      - MCP_FILESYSTEM_URL=${MCP_FILESYSTEM_URL:-http://host.docker.internal:3003}
+      - MCP_PLAYWRIGHT_URL=${MCP_PLAYWRIGHT_URL:-http://host.docker.internal:3004}
+      - MCP_GITHUB_URL=${MCP_GITHUB_URL:-http://host.docker.internal:3005}
     volumes:
       - ./:/app
       - /app/node_modules
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Allow access to host services
 
   mysql:
     image: mysql:8.4

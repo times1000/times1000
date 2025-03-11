@@ -29,81 +29,110 @@ export async function generatePlan(
     
     console.log(`Generating plan for agent ${agent.id} with command: "${command}"`);
     
-    // Send to the OpenAI API
-    // We need to use the OpenAI client directly for tool calling support
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages,
-      temperature: 0.7,
-      max_tokens: 2000,
-      tools: [
-        {
-          type: 'function',
-          function: {
-            name: 'createPlan',
-            description: 'Create a detailed execution plan with steps',
-            parameters: {
+    // Define the tool for creating plans
+    const planTool = {
+      name: 'createPlan',
+      description: 'Create a detailed execution plan with steps',
+      parameters: {
+        type: 'object',
+        properties: {
+          description: {
+            type: 'string',
+            description: 'A brief summary of what the plan will accomplish'
+          },
+          reasoning: {
+            type: 'string',
+            description: 'The reasoning behind the plan structure and approach'
+          },
+          steps: {
+            type: 'array',
+            description: 'The step-by-step execution plan',
+            items: {
               type: 'object',
               properties: {
                 description: {
                   type: 'string',
-                  description: 'A brief summary of what the plan will accomplish'
+                  description: 'A description of what this step accomplishes'
                 },
-                reasoning: {
+                estimatedDuration: {
+                  type: 'number',
+                  description: 'Estimated time to complete this step in seconds'
+                },
+                details: {
                   type: 'string',
-                  description: 'The reasoning behind the plan structure and approach'
-                },
-                steps: {
-                  type: 'array',
-                  description: 'The step-by-step execution plan',
-                  items: {
-                    type: 'object',
-                    properties: {
-                      description: {
-                        type: 'string',
-                        description: 'A description of what this step accomplishes'
-                      },
-                      estimatedDuration: {
-                        type: 'number',
-                        description: 'Estimated time to complete this step in seconds'
-                      },
-                      details: {
-                        type: 'string',
-                        description: 'Additional details about how this step will be executed'
-                      }
-                    },
-                    required: ['description']
-                  }
-                },
-                hasFollowUp: {
-                  type: 'boolean',
-                  description: 'Whether this plan will likely need follow-up actions'
-                },
-                followUpSuggestions: {
-                  type: 'array',
-                  description: 'Potential follow-up actions after plan completion',
-                  items: {
-                    type: 'string'
-                  }
-                },
-                agentName: includeNameAndDescription ? {
-                  type: 'string',
-                  description: 'A concise, descriptive name for the agent based on its purpose and capabilities'
-                } : undefined,
-                agentDescription: includeNameAndDescription ? {
-                  type: 'string',
-                  description: 'A detailed description of what this agent does and its primary function'
-                } : undefined
+                  description: 'Additional details about how this step will be executed'
+                }
               },
-              required: includeNameAndDescription 
-                ? ['description', 'reasoning', 'steps', 'hasFollowUp', 'agentName', 'agentDescription'] 
-                : ['description', 'reasoning', 'steps', 'hasFollowUp']
+              required: ['description']
             }
-          }
+          },
+          hasFollowUp: {
+            type: 'boolean',
+            description: 'Whether this plan will likely need follow-up actions'
+          },
+          followUpSuggestions: {
+            type: 'array',
+            description: 'Potential follow-up actions after plan completion',
+            items: {
+              type: 'string'
+            }
+          },
+          agentName: includeNameAndDescription ? {
+            type: 'string',
+            description: 'A concise, descriptive name for the agent based on its purpose and capabilities'
+          } : undefined,
+          agentDescription: includeNameAndDescription ? {
+            type: 'string',
+            description: 'A detailed description of what this agent does and its primary function'
+          } : undefined
+        },
+        required: includeNameAndDescription 
+          ? ['description', 'reasoning', 'steps', 'hasFollowUp', 'agentName', 'agentDescription'] 
+          : ['description', 'reasoning', 'steps', 'hasFollowUp']
+      }
+    };
+    
+    // Try to use the abstracted LLM service with tool execution
+    try {
+      // Use our abstracted service to allow tools to be used
+      const response = await llm.chatCompletion(
+        messages,
+        {
+          model: 'gpt-4o',
+          temperature: 0.7,
+          maxTokens: 2000,
+          executionStrategy: 'tools', 
+          tools: [planTool]
+        },
+        {
+          operation: 'generate_plan',
+          agentId: agent.id
         }
-      ],
-      tool_choice: { type: 'function', function: { name: 'createPlan' } }
-    });
+      );
+      
+      // Extract tool call results from the response
+      if (response.toolUsage && response.toolUsage.toolCalls > 0) {
+        // Tool call was used, get the plan data from the tool response
+        // For now, we're assuming the data is embedded in the content as JSON
+        const planData = JSON.parse(response.content);
+        return processPlanData(planData, agent, includeNameAndDescription);
+      }
+      
+      // Fallback to OpenAI direct call if no tool results
+      throw new Error('Tool execution did not return valid plan data');
+    } catch (error) {
+      console.log('Claude Code tool execution failed, falling back to OpenAI direct call:', error);
+      
+      // Send to the OpenAI API directly as fallback
+      // We need to use the OpenAI client directly for tool calling support
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages,
+        temperature: 0.7,
+        max_tokens: 2000,
+        tools: [{ type: 'function', function: planTool }],
+        tool_choice: { type: 'function', function: { name: 'createPlan' } }
+      });
     
     // Log the request to our LLM logging system
     if (response.usage) {
@@ -135,12 +164,27 @@ export async function generatePlan(
     }
     
     const planData = JSON.parse(toolCalls[0].function.arguments);
-    
-    // Create and return the plan
+    return processPlanData(planData, agent, includeNameAndDescription);
+  } catch (error: any) {
+    console.error('Error generating plan:', error);
+    throw new Error(`Failed to generate plan: ${error.message}`);
+  }
+}
+
+/**
+ * Process plan data from either Claude Code or OpenAI
+ */
+function processPlanData(
+  planData: any, 
+  agent: Agent, 
+  includeNameAndDescription: boolean
+): { plan: Plan; agentNameAndDescription?: AgentNameAndDescription } {
+  try {
+    // Create the plan
     const plan = new PlanImpl(
       uuidv4(),
       agent.id,
-      command,
+      agent.currentPlan?.command || "Unknown command",
       planData.description,
       planData.reasoning
     );
@@ -176,6 +220,11 @@ export async function generatePlan(
       plan,
       agentNameAndDescription
     };
+  } catch (error) {
+    console.error('Error processing plan data:', error);
+    throw new Error('Failed to process plan data');
+  }
+}
   } catch (error: any) {
     console.error('Error generating plan:', error);
     throw new Error(`Failed to generate plan: ${error.message}`);
