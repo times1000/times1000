@@ -1,6 +1,5 @@
 import * as openai from './openai';
-// Temporarily removed Anthropic import until dependency is installed
-// import * as anthropic from './anthropic';
+import * as anthropic from './anthropic';
 import { LLMMessage, LLMChatCompletionResponse, ModelConfig, LLMEmbeddingResponse, RequestContext } from './types';
 import { logLLMRequest } from './logger';
 import { calculateCost } from './pricing';
@@ -24,15 +23,15 @@ export async function chatCompletion(
   switch (provider) {
     case 'anthropic':
     case 'claude':
-      // Temporarily only support OpenAI until Anthropic dependency is installed
-      console.warn('Anthropic provider not currently available, using OpenAI instead');
-      // Set default model
-      config.model = 'gpt-4o';
-      return openai.chatCompletion(messages, config, context);
+      // Set default model if not appropriate for Anthropic
+      if (!config.model || !config.model.startsWith('claude-')) {
+        config.model = 'claude-3-sonnet';
+      }
+      return anthropic.chatCompletion(messages, config, context);
       
     case 'openai':
     default:
-      // Set default model if not specified
+      // Set default model if not appropriate for OpenAI
       if (!config.model || config.model.startsWith('claude-')) {
         config.model = 'gpt-4o';
       }
@@ -51,16 +50,22 @@ export async function generateEmbedding(
   // Determine which provider to use
   const provider = config.provider?.toLowerCase() || defaultEmbeddingProvider;
   
-  // Currently, only OpenAI supports embeddings in our implementation
-  if (provider !== 'openai') {
-    console.warn(`Embedding provider "${provider}" not supported, using OpenAI`);
+  // Route to appropriate provider
+  switch (provider) {
+    case 'anthropic':
+    case 'claude':
+      // Anthropic doesn't support embeddings yet, but we'll try to call it
+      // (it will throw an appropriate error with proper logging)
+      return anthropic.generateEmbedding(text, config.model, context);
+      
+    case 'openai':
+    default:
+      return openai.generateEmbedding(
+        text, 
+        config.model || 'text-embedding-3-small', 
+        context
+      );
   }
-  
-  return openai.generateEmbedding(
-    text, 
-    config.model || 'text-embedding-3-small', 
-    context
-  );
 }
 
 /**
