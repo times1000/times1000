@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Socket } from 'socket.io-client';
-import { AgentData } from '../../types/agent';
+import { AgentData, AgentStatus } from '../../types/agent';
 
 interface PlanStep {
   id: string;
@@ -48,7 +48,7 @@ const PendingApprovals = ({ socket }: PendingApprovalsProps) => {
 
       // Filter agents with awaiting_approval status
       const awaitingApprovalAgents = agents.filter((agent: AgentData) => 
-        agent.status === 'awaiting_approval'
+        agent.status === AgentStatus.AWAITING_APPROVAL
       );
 
       // For each agent, fetch their current plan
@@ -214,6 +214,7 @@ const PendingApprovals = ({ socket }: PendingApprovalsProps) => {
             <div className="approval-header">
               <h3>{agent.name}</h3>
               <span className="status-badge awaiting">Awaiting Approval</span>
+              {agent.type && <span className="agent-type">{agent.type}</span>}
             </div>
             
             <div className="plan-details">
@@ -223,6 +224,11 @@ const PendingApprovals = ({ socket }: PendingApprovalsProps) => {
                 <div className="plan-reasoning">
                   <p><strong>Reasoning:</strong></p>
                   <p>{plan.reasoning}</p>
+                </div>
+              )}
+              {agent.personalityProfile && (
+                <div className="agent-personality">
+                  <p><strong>Personality:</strong> {agent.personalityProfile}</p>
                 </div>
               )}
             </div>

@@ -19,6 +19,14 @@ export class BackgroundProcessor {
   constructor(io: Server, openai: OpenAI) {
     this.io = io;
     this.openai = openai;
+    
+    // Add error handler for Socket.IO
+    this.io.on('error', (error) => {
+      console.error('Socket.IO error in background processor:', error);
+      logOperation('background_processor_socket_error', {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    });
   }
 
   /**
@@ -28,6 +36,11 @@ export class BackgroundProcessor {
     if (this.running) {
       console.log('Background processor is already running');
       return;
+    }
+
+    // Verify OpenAI API key is set
+    if (!process.env.OPENAI_API_KEY) {
+      console.warn('WARNING: Starting background processor without OpenAI API key. LLM tasks will fail.');
     }
 
     console.log('Starting background processor');
@@ -42,7 +55,8 @@ export class BackgroundProcessor {
     }, this.pollInterval);
 
     logOperation('background_processor_started', {
-      pollInterval: this.pollInterval
+      pollInterval: this.pollInterval,
+      hasApiKey: !!process.env.OPENAI_API_KEY
     });
   }
 
