@@ -590,7 +590,7 @@ async function executeAiProcessingFallback(io: Server, agentId: string, planId: 
 async function executeStepWithLLM(plan: any, step: any, stepNumber: number, agent: any = null): Promise<string> {
   try {
     // Get model from environment or default
-    const model = process.env.DEFAULT_STEP_MODEL || 'gpt-4o';
+    const model = process.env.DEFAULT_STEP_MODEL || 'gpt-4o-mini';
     const provider = process.env.DEFAULT_LLM_PROVIDER || 'openai';
     
     // Build the prompt for step execution with agent context
