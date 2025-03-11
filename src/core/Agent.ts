@@ -1,5 +1,5 @@
 import EventEmitter from 'events';
-import { Plan, PlanStep } from './Plan';
+import { Plan, PlanStep, StepStatus, PlanStatus } from './Plan';
 import { generatePlan } from './PlanGenerator';
 import { AgentStatus } from '../types/agent';
 import { DEFAULT_MAX_LISTENERS, AGENT_STATUS, STEP_STATUS, PLAN_STATUS } from '../config/constants';
@@ -160,7 +160,7 @@ export class Agent extends EventEmitter {
       // Execute each step in the plan
       for (const step of this.currentPlan!.steps) {
         // Update step status
-        step.status = STEP_STATUS.IN_PROGRESS;
+        step.status = 'in_progress' as StepStatus;
         this.emit('stepStatusChange', step);
         
         // Execute the step
@@ -168,12 +168,12 @@ export class Agent extends EventEmitter {
         step.result = result;
         
         // Update step status to completed
-        step.status = STEP_STATUS.COMPLETED;
+        step.status = 'completed' as StepStatus;
         this.emit('stepStatusChange', step);
       }
       
       // Plan completed successfully
-      this.currentPlan!.status = PLAN_STATUS.COMPLETED;
+      this.currentPlan!.status = 'completed' as PlanStatus;
       this.updateStatus(AgentStatus.IDLE);
       this.emit('planCompleted', this.currentPlan);
       
@@ -202,7 +202,7 @@ export class Agent extends EventEmitter {
     this.validateStatus(AgentStatus.AWAITING_APPROVAL);
     
     // Update plan status
-    this.currentPlan!.status = PLAN_STATUS.APPROVED;
+    this.currentPlan!.status = 'approved' as PlanStatus;
     this.emit('planApproved', this.currentPlan);
   }
 
@@ -212,7 +212,7 @@ export class Agent extends EventEmitter {
     this.validateStatus(AgentStatus.AWAITING_APPROVAL);
     
     // Update plan and agent status
-    this.currentPlan!.status = PLAN_STATUS.REJECTED;
+    this.currentPlan!.status = 'rejected' as PlanStatus;
     this.updateStatus(AgentStatus.IDLE);
     this.currentPlan = null;
     this.emit('planRejected');

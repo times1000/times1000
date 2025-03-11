@@ -9,6 +9,9 @@ export const DEFAULT_MODELS = {
   PLAN_GENERATION: process.env.DEFAULT_PLAN_MODEL || 'gpt-4o',
   AGENT_METADATA: process.env.DEFAULT_METADATA_MODEL || 'gpt-4o',
   
+  // Plan execution
+  PLAN_EXECUTION: process.env.DEFAULT_PLAN_EXECUTION_MODEL || 'gpt-4o',
+  
   // Step execution
   STEP_EXECUTION: process.env.DEFAULT_STEP_MODEL || 'gpt-4o-mini',
   

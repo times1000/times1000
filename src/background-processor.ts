@@ -286,7 +286,7 @@ export class BackgroundProcessor {
           });
           
           // Execute the plan in background
-          executeAiProcessing(this.io, agent.id as string, planData.id);
+          executeAiProcessing(agent.id as string, planData.id);
         }
       }
     } catch (error) {
