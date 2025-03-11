@@ -131,15 +131,95 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
     
     fetchCurrentPlan();
     
-    // Setup interval to refresh plan status with reduced frequency
-    const intervalId = setInterval(fetchCurrentPlan, 15000);
+    // Join agent-specific room for targeted updates
+    socket.emit('agent:subscribe', agentId);
     
-    // Cleanup function to handle both interval and fetch cancellation
+    // Listen for specific plan events
+    socket.on('step:status', (data) => {
+      if (data.agentId === agentId) {
+        setCurrentPlan(prevPlan => {
+          if (!prevPlan) return null;
+          
+          // Update the specific step's status
+          const updatedSteps = prevPlan.steps.map(step => 
+            step.id === data.stepId ? { ...step, status: data.status } : step
+          );
+          
+          return { ...prevPlan, steps: updatedSteps };
+        });
+      }
+    });
+    
+    socket.on('step:completed', (data) => {
+      if (data.agentId === agentId) {
+        setCurrentPlan(prevPlan => {
+          if (!prevPlan) return null;
+          
+          // Update completed step with result
+          const updatedSteps = prevPlan.steps.map(step => 
+            step.id === data.stepId ? { 
+              ...step, 
+              status: 'completed',
+              result: data.result 
+            } : step
+          );
+          
+          return { ...prevPlan, steps: updatedSteps };
+        });
+      }
+    });
+    
+    socket.on('plan:completed', (data) => {
+      if (data.agentId === agentId) {
+        setCurrentPlan(prevPlan => {
+          if (!prevPlan) return null;
+          return { 
+            ...prevPlan, 
+            status: 'completed',
+            hasFollowUp: data.hasFollowUp,
+            followUpSuggestions: data.followUpSuggestions
+          };
+        });
+      }
+    });
+    
+    socket.on('plan:failed', (data) => {
+      if (data.agentId === agentId) {
+        setCurrentPlan(prevPlan => {
+          if (!prevPlan) return null;
+          return { ...prevPlan, status: 'failed' };
+        });
+      }
+    });
+    
+    socket.on('plan:followup', (data) => {
+      if (data.agentId === agentId) {
+        setCurrentPlan(prevPlan => {
+          if (!prevPlan) return null;
+          return { 
+            ...prevPlan, 
+            hasFollowUp: data.hasFollowUp,
+            followUpSuggestions: data.followUpSuggestions
+          };
+        });
+      }
+    });
+    
+    // Cleanup function
     return () => {
-      clearInterval(intervalId);
+      // Unsubscribe from agent room
+      socket.emit('agent:unsubscribe', agentId);
+      
+      // Remove all listeners
+      socket.off('step:status');
+      socket.off('step:completed');
+      socket.off('plan:completed');
+      socket.off('plan:failed');
+      socket.off('plan:followup');
+      
       abortController.abort();
     };
-  }, [agentId]);
+  }, [agentId, socket]);
   
   const handleSubmitCommand = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -187,7 +267,8 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
     if (!currentPlan) return;
     
     try {
-      const response = await fetch(`/api/agents/${agentId}/plans/${currentPlan.planId}/approve`, {
+      // Use the correct API endpoint
+      const response = await fetch(`/api/plans/${currentPlan.planId}/approve`, {
         method: 'POST',
       });
       
@@ -209,7 +290,8 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
     if (!currentPlan) return;
     
     try {
-      const response = await fetch(`/api/agents/${agentId}/plans/${currentPlan.planId}/reject`, {
+      // Use the correct API endpoint
+      const response = await fetch(`/api/plans/${currentPlan.planId}/reject`, {
         method: 'POST',
       });
       
