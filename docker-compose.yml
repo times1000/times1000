@@ -1,0 +1,47 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+      - "5173:5173"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      - PORT=3000
+      - DB_HOST=mysql  # Use container name as host in Docker network
+      - DB_PORT=3306   # Default MySQL port inside the container
+      - DB_USER=times1000
+      - DB_PASSWORD=times1000_password
+      - DB_NAME=times1000
+      - NODE_ENV=development
+      - VITE_SERVER_URL=http://localhost:3000
+    volumes:
+      - ./:/app
+      - /app/node_modules
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.4
+    ports:
+      - "3307:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=root_password
+      - MYSQL_DATABASE=times1000
+      - MYSQL_USER=times1000
+      - MYSQL_PASSWORD=times1000_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init-sql:/docker-entrypoint-initdb.d
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "times1000", "-ptimes1000_password"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  mysql_data:

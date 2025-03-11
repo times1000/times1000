@@ -1,0 +1,40 @@
+export enum AgentStatus {
+  IDLE = 'idle',
+  PLANNING = 'planning',
+  AWAITING_APPROVAL = 'awaiting_approval',
+  EXECUTING = 'executing',
+  ERROR = 'error'
+}
+
+export interface AgentConfig {
+  id: string;
+  name: string;
+  description: string;
+  capabilities: string[];
+  settings: Record<string, any>;
+}
+
+export interface AgentData {
+  id: string;
+  name: string;
+  description: string;
+  status: AgentStatus;
+  capabilities: string[];
+  createdAt: Date;
+  lastActive: Date;
+}
+
+export interface AgentStats {
+  plansCreated: number;
+  plansExecuted: number;
+  plansRejected: number;
+  executionTime: number;
+  successRate: number;
+}
+
+export interface AgentCreationRequest {
+  command: string;
+  initialCapabilities?: string[];
+  personalityProfile?: string;
+  settings?: Record<string, any>;
+}
