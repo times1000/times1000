@@ -1,17 +1,24 @@
 import mysql, { RowDataPacket } from 'mysql2/promise';
 import { Plan, PlanRowData } from '../types/db';
 
+// Database configuration with environment variables
 // Create a connection pool
 const pool = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
   port: parseInt(process.env.DB_PORT || '3306', 10),
-  user: process.env.DB_USER || 'times1000',
-  password: process.env.DB_PASSWORD || 'times1000_password',
+  user: process.env.DB_USER || '',
+  password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'times1000',
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0
 });
+
+// Check if database credentials are properly configured
+if (!process.env.DB_USER || !process.env.DB_PASSWORD) {
+  console.warn('WARNING: Database credentials not properly configured in environment variables.');
+  console.warn('Set DB_USER and DB_PASSWORD in your environment or .env file.');
+}
 
 // Test database connection and ensure schema is up to date
 const testConnection = async (): Promise<boolean> => {
@@ -156,10 +163,8 @@ const agentOperations = {
       const typeColumnExists = Array.isArray(typeColumnCheck) && typeColumnCheck.length > 0;
       
       // Prepare the query based on existing columns
-      let insertSql = `
-        INSERT INTO agents (id, name, description, status, capabilities`;
-      let placeholders = `?, ?, ?, ?, ?`;
-      const values = [
+      const columnsList = ['id', 'name', 'description', 'status', 'capabilities'];
+      const placeholderValues = [
         agent.id, 
         agent.name, 
         agent.description, 
@@ -169,31 +174,29 @@ const agentOperations = {
       
       // Add personality_profile column if it exists
       if (hasPersonalityColumn) {
-        insertSql += `, personality_profile`;
-        placeholders += `, ?`;
-        values.push(personalityProfile);
+        columnsList.push('personality_profile');
+        placeholderValues.push(personalityProfile);
       }
       
       // Add settings column if it exists
       if (hasSettingsColumn) {
-        insertSql += `, settings`;
-        placeholders += `, ?`;
-        values.push(settings);
+        columnsList.push('settings');
+        placeholderValues.push(settings);
       }
       
       // Handle type column if it still exists (transitional support)
       if (typeColumnExists) {
-        insertSql += `, type`;
-        placeholders += `, ?`;
+        columnsList.push('type');
         // Use 'custom' as the type for all agents in the unified model
-        values.push('custom');
+        placeholderValues.push('custom');
       }
       
-      // Close the query
-      insertSql += `) VALUES (${placeholders})`;
+      // Build the query with parameterized placeholders
+      const placeholders = placeholderValues.map(() => '?').join(', ');
+      const insertSql = `INSERT INTO agents (${columnsList.join(', ')}) VALUES (${placeholders})`;
       
       // Execute the query
-      await pool.query(insertSql, values);
+      await pool.query(insertSql, placeholderValues);
       
       return {
         ...agent,
@@ -282,10 +285,8 @@ const agentOperations = {
       
       values.push(id); // Add ID for WHERE clause
       
-      await pool.query(`
-        UPDATE agents SET ${updateFields.join(', ')}
-        WHERE id = ?
-      `, values);
+      // Use parameterized query
+      await pool.query(`UPDATE agents SET ${updateFields.join(', ')} WHERE id = ?`, values);
       
       return {
         ...agent,

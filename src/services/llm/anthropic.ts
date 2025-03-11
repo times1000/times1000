@@ -1,15 +1,25 @@
 import { LLMMessage, LLMChatCompletionResponse, ModelConfig, RequestContext } from './types';
 
 /**
- * STUB: This is a placeholder for the Anthropic Claude API client
- * The actual implementation will be added once the dependency is installed
- * 
- * For now, we're directing all requests to OpenAI in the index.ts file.
+ * Placeholder implementation for the Anthropic Claude API client
+ * This returns a dummy response instead of throwing an error
  */
 export async function chatCompletion(
   messages: LLMMessage[],
-  _config: ModelConfig = { model: 'claude-3-sonnet' },
+  config: ModelConfig = { model: 'claude-3-sonnet' },
   _context: RequestContext = {}
 ): Promise<LLMChatCompletionResponse> {
-  throw new Error('Anthropic implementation not available');
+  console.warn('Using placeholder Anthropic implementation');
+  
+  // Return a dummy/fallback response in LLMChatCompletionResponse format
+  return {
+    content: 'This is a placeholder response. The Anthropic API integration is not fully implemented.',
+    tokenUsage: {
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0
+    },
+    model: config.model || 'claude-3-sonnet',
+    finishReason: 'stop'
+  };
 }

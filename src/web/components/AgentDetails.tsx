@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Socket } from 'socket.io-client';
-import { AgentStatus } from '../../types/agent';
+import { AgentStatus, AgentData } from '../../types/agent';
+import { Plan } from '../../types/db';
 import PlanViewer from './PlanViewer';
 import LogViewer from './LogViewer';
 
@@ -13,7 +14,7 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
   const { agentId } = useParams<{ agentId: string }>();
   const navigate = useNavigate();
   
-  const [agent, setAgent] = useState<any>(null);
+  const [agent, setAgent] = useState<AgentData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [command, setCommand] = useState<string>('');
@@ -49,10 +50,10 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
     // Set up socket event listeners
     socket.on('agent:updated', (updatedAgent) => {
       if (updatedAgent.id === agentId) {
-        setAgent((prevAgent: any) => ({
+        setAgent((prevAgent) => prevAgent ? {
           ...prevAgent,
           ...updatedAgent
-        }));
+        } : updatedAgent);
       }
     });
     
@@ -87,16 +88,21 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
   }, [agentId, socket]);
   
   // Fetch current plan
-  const [currentPlan, setCurrentPlan] = useState<any>(null);
+  const [currentPlan, setCurrentPlan] = useState<Plan | null>(null);
   const [planLoading, setPlanLoading] = useState<boolean>(false);
   
   useEffect(() => {
+    const abortController = new AbortController();
+    
     const fetchCurrentPlan = async () => {
       if (!agentId) return;
       
       try {
         setPlanLoading(true);
-        const response = await fetch(`/api/agents/${agentId}/current-plan`);
+        // Use AbortController signal for fetch requests
+        const response = await fetch(`/api/agents/${agentId}/current-plan`, {
+          signal: abortController.signal
+        });
         
         if (!response.ok) {
           throw new Error('Failed to fetch plan');
@@ -105,9 +111,15 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
         const data = await response.json();
         setCurrentPlan(data.hasPlan ? data : null);
       } catch (err) {
-        console.error('Error fetching current plan:', err);
+        // Avoid logging aborted requests
+        if (err instanceof Error && err.name !== 'AbortError') {
+          console.error('Error fetching current plan:', err);
+        }
       } finally {
-        setPlanLoading(false);
+        // Only set loading to false if component is still mounted
+        if (!abortController.signal.aborted) {
+          setPlanLoading(false);
+        }
       }
     };
     
@@ -116,7 +128,11 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
     // Setup interval to refresh plan status
     const intervalId = setInterval(fetchCurrentPlan, 5000);
     
-    return () => clearInterval(intervalId);
+    // Cleanup function to handle both interval and fetch cancellation
+    return () => {
+      clearInterval(intervalId);
+      abortController.abort();
+    };
   }, [agentId]);
   
   const handleSubmitCommand = async (e: React.FormEvent) => {
@@ -249,7 +265,6 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
       <div className="agent-info">
         <div className="info-section">
           <h2>Details</h2>
-          <p><strong>Type:</strong> {agent.type}</p>
           <p><strong>Description:</strong> {agent.description}</p>
         </div>
         

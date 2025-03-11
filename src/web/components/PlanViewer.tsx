@@ -15,7 +15,7 @@ interface Plan {
   reasoning: string;
   status: 'draft' | 'awaiting_approval' | 'approved' | 'executing' | 'completed' | 'failed' | 'rejected';
   steps: PlanStep[];
-  hasFollowUp: boolean;
+  hasFollowUp?: boolean;
   followUpSuggestions?: string[];
 }
 

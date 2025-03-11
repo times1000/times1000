@@ -17,9 +17,12 @@ export interface AgentConfig {
 export interface AgentData {
   id: string;
   name: string;
+  type?: string;
   description: string;
   status: AgentStatus;
   capabilities: string[];
+  personalityProfile?: string;
+  settings?: Record<string, any>;
   createdAt: Date;
   lastActive: Date;
 }

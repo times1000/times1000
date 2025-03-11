@@ -15,8 +15,13 @@ const io = new Server(server);
 
 // Initialize OpenAI client
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || 'sk-dummy-key-for-development',
+  apiKey: process.env.OPENAI_API_KEY || '',
 });
+
+// Verify API key is configured
+if (!process.env.OPENAI_API_KEY) {
+  console.warn('WARNING: OPENAI_API_KEY environment variable not set. LLM features will not work correctly.');
+}
 
 // Test database connection on startup and force reload
 console.log('Testing database connection and ensuring fresh connection...');
@@ -52,6 +57,16 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     console.log('A client disconnected');
   });
+  
+  // Handle socket errors
+  socket.on('error', (err) => {
+    console.error('Socket error:', err);
+  });
+});
+
+// Handle io server errors
+io.engine.on('connection_error', (err) => {
+  console.error('Socket.io connection error:', err);
 });
 
 // Start the server

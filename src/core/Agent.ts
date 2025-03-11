@@ -19,6 +19,9 @@ export class Agent extends EventEmitter {
   
   constructor(id: string, name: string = 'Unnamed Agent', description: string = 'Agent awaiting configuration') {
     super();
+    // Set maximum listeners to avoid memory leaks with many listeners
+    this.setMaxListeners(20);
+    
     this.id = id;
     this.name = name;
     this.description = description;

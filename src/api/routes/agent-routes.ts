@@ -1,7 +1,6 @@
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import db from '../../db';
-// import { generatePlan } from '../services/plan-service';
 import { logOperation } from '../services/logging-service';
 import { Server } from 'socket.io';
 import OpenAI from 'openai';
@@ -117,7 +116,7 @@ export default function(io: Server, _openai: OpenAI) {
       });
     } catch (error) {
       console.error('Error creating agent:', error);
-      res.status(500).json({ error: 'Failed to create agent' });
+      res.status(500).json({ error: 'Internal server error while creating agent' });
     }
   });
 
@@ -315,7 +314,7 @@ export default function(io: Server, _openai: OpenAI) {
       });
     } catch (error) {
       console.error('Error creating plan:', error);
-      res.status(500).json({ error: 'Failed to create plan' });
+      res.status(500).json({ error: 'Internal server error while creating plan' });
     }
   });
 
