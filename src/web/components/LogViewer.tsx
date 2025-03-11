@@ -58,7 +58,10 @@ interface LogViewerProps {
   logType?: 'llm' | 'system';
 }
 
-const LogViewer: React.FC<LogViewerProps> = ({ agentId, logType = 'llm' }) => {
+const LogViewer: React.FC<LogViewerProps> = ({ agentId, logType }) => {
+  // Determine log type from URL hash if not provided via props
+  const [activeLogType, setActiveLogType] = useState<'llm' | 'system'>('llm');
+  
   const [logs, setLogs] = useState<Log[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -72,6 +75,31 @@ const LogViewer: React.FC<LogViewerProps> = ({ agentId, logType = 'llm' }) => {
   // Selected log for detailed view
   const [selectedLog, setSelectedLog] = useState<Log | null>(null);
   
+  // Handle hash changes
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash;
+      if (hash === '#/system-logs') {
+        setActiveLogType('system');
+      } else {
+        setActiveLogType('llm');
+      }
+    };
+    
+    // Set initial state based on hash
+    handleHashChange();
+    
+    // Listen for hash changes
+    window.addEventListener('hashchange', handleHashChange);
+    
+    return () => {
+      window.removeEventListener('hashchange', handleHashChange);
+    };
+  }, []);
+  
+  // Use the prop if provided, otherwise use the state from hash
+  const currentLogType = logType || activeLogType;
+  
   useEffect(() => {
     const fetchLogs = async () => {
       try {
@@ -79,22 +107,22 @@ const LogViewer: React.FC<LogViewerProps> = ({ agentId, logType = 'llm' }) => {
         let url = '';
         
         if (agentId) {
-          url = `/api/logs/${logType}/agent/${agentId}?page=${pagination.page}&limit=${pagination.limit}`;
+          url = `/api/logs/${currentLogType}/agent/${agentId}?page=${pagination.page}&limit=${pagination.limit}`;
         } else {
-          url = `/api/logs/${logType}?page=${pagination.page}&limit=${pagination.limit}`;
+          url = `/api/logs/${currentLogType}?page=${pagination.page}&limit=${pagination.limit}`;
         }
         
         const response = await fetch(url);
         
         if (!response.ok) {
-          throw new Error(`Failed to fetch ${logType} logs`);
+          throw new Error(`Failed to fetch ${currentLogType} logs`);
         }
         
         const data = await response.json();
         setLogs(data.logs);
         setPagination(data.pagination);
       } catch (err) {
-        console.error(`Error fetching ${logType} logs:`, err);
+        console.error(`Error fetching ${currentLogType} logs:`, err);
         setError(err instanceof Error ? err.message : 'Failed to load logs');
       } finally {
         setLoading(false);
@@ -102,7 +130,7 @@ const LogViewer: React.FC<LogViewerProps> = ({ agentId, logType = 'llm' }) => {
     };
     
     fetchLogs();
-  }, [agentId, pagination.page, pagination.limit, logType]);
+  }, [agentId, pagination.page, pagination.limit, currentLogType]);
   
   const handlePageChange = (newPage: number) => {
     if (newPage > 0 && newPage <= pagination.totalPages) {
@@ -160,21 +188,21 @@ const LogViewer: React.FC<LogViewerProps> = ({ agentId, logType = 'llm' }) => {
     <div className="log-viewer">
       <div className="log-header">
         <h2>
-          {agentId ? `Agent ${logType.toUpperCase()} Logs` : `All ${logType.toUpperCase()} Logs`}
+          {agentId ? `Agent ${currentLogType.toUpperCase()} Logs` : `All ${currentLogType.toUpperCase()} Logs`}
         </h2>
         
         <div className="log-type-toggle">
           <a 
-            href={logType === 'llm' ? '#/system-logs' : '#/llm-logs'} 
+            href="#/llm-logs" 
             onClick={handleToggleLogType}
-            className={`toggle-button ${logType === 'llm' ? 'active' : ''}`}
+            className={`toggle-button ${currentLogType === 'llm' ? 'active' : ''}`}
           >
             LLM Logs
           </a>
           <a 
-            href={logType === 'system' ? '#/llm-logs' : '#/system-logs'} 
+            href="#/system-logs" 
             onClick={handleToggleLogType}
-            className={`toggle-button ${logType === 'system' ? 'active' : ''}`}
+            className={`toggle-button ${currentLogType === 'system' ? 'active' : ''}`}
           >
             System Logs
           </a>
@@ -205,7 +233,11 @@ const LogViewer: React.FC<LogViewerProps> = ({ agentId, logType = 'llm' }) => {
                     if (!isLLMLog(log)) return null;
                     
                     return (
-                      <tr key={log.id} className={`log-row status-${log.status}`}>
+                      <tr 
+                        key={log.id} 
+                        className={`log-row status-${log.status} clickable-row`}
+                        onClick={() => handleViewDetails(log)}
+                      >
                         <td>{formatDate(log.createdAt)}</td>
                         <td>{log.operation}</td>
                         <td>{log.provider || 'unknown'}</td>
@@ -220,7 +252,10 @@ const LogViewer: React.FC<LogViewerProps> = ({ agentId, logType = 'llm' }) => {
                         <td>
                           <button 
                             className="view-details-button"
-                            onClick={() => handleViewDetails(log)}
+                            onClick={(e) => {
+                              e.stopPropagation(); // Prevent row click from triggering
+                              handleViewDetails(log);
+                            }}
                           >
                             View Details
                           </button>
@@ -248,7 +283,11 @@ const LogViewer: React.FC<LogViewerProps> = ({ agentId, logType = 'llm' }) => {
                     if (!isSystemLog(log)) return null;
                     
                     return (
-                      <tr key={log.id} className={`log-row level-${log.level}`}>
+                      <tr 
+                        key={log.id} 
+                        className={`log-row level-${log.level} clickable-row`}
+                        onClick={() => handleViewDetails(log)}
+                      >
                         <td>{formatDate(log.createdAt)}</td>
                         <td>{log.source}</td>
                         <td>{log.operation}</td>
@@ -262,7 +301,10 @@ const LogViewer: React.FC<LogViewerProps> = ({ agentId, logType = 'llm' }) => {
                         <td>
                           <button 
                             className="view-details-button"
-                            onClick={() => handleViewDetails(log)}
+                            onClick={(e) => {
+                              e.stopPropagation(); // Prevent row click from triggering
+                              handleViewDetails(log);
+                            }}
                           >
                             View Details
                           </button>

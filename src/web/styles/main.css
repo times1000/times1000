@@ -1155,6 +1155,15 @@ body {
   background-color: #f9f9f9;
 }
 
+.clickable-row {
+  cursor: pointer;
+}
+
+.clickable-row:hover {
+  background-color: #f2f8ff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
 .log-row.status-error {
   background-color: rgba(231, 76, 60, 0.1);
 }
