@@ -18,6 +18,8 @@ services:
       - DB_NAME=times1000
       - NODE_ENV=development
       - VITE_SERVER_URL=http://localhost:3000
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DEFAULT_LLM_PROVIDER=openai
     volumes:
       - ./:/app
       - /app/node_modules

@@ -19,6 +19,15 @@ export async function chatCompletion(
   // Determine which provider to use
   const provider = config.provider?.toLowerCase() || defaultChatProvider;
   
+  // Check if environment variables are properly set
+  if (provider === 'openai' && !process.env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY environment variable is not set. Please configure the API key in environment variables.');
+  }
+  
+  if ((provider === 'anthropic' || provider === 'claude') && !process.env.ANTHROPIC_API_KEY) {
+    throw new Error('ANTHROPIC_API_KEY environment variable is not set. Please configure the API key in environment variables.');
+  }
+  
   // Route to appropriate provider
   switch (provider) {
     case 'anthropic':
@@ -49,6 +58,15 @@ export async function generateEmbedding(
 ): Promise<LLMEmbeddingResponse> {
   // Determine which provider to use
   const provider = config.provider?.toLowerCase() || defaultEmbeddingProvider;
+  
+  // Check if environment variables are properly set
+  if (provider === 'openai' && !process.env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY environment variable is not set. Please configure the API key in environment variables.');
+  }
+  
+  if ((provider === 'anthropic' || provider === 'claude') && !process.env.ANTHROPIC_API_KEY) {
+    throw new Error('ANTHROPIC_API_KEY environment variable is not set. Please configure the API key in environment variables.');
+  }
   
   // Route to appropriate provider
   switch (provider) {

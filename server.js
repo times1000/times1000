@@ -31,11 +31,11 @@ db.default.testConnection();
 // Export db pool for shutdown handling
 exports.pool = db.pool;
 
-// Set up API routes
-setupAPI(app, io);
-
 // Serve static files from the dist directory
 app.use(express.static(path.join(__dirname, 'dist')));
+
+// Set up API routes - IMPORTANT: API routes must be defined after static files but before the catch-all route
+setupAPI(app, io);
 
 // All other routes should redirect to index.html for SPA
 app.get('*', (req, res) => {

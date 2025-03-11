@@ -3,9 +3,14 @@ import { LLMMessage, LLMChatCompletionResponse, ModelConfig, LLMEmbeddingRespons
 import { logLLMRequest } from './logger';
 import { calculateCost } from './pricing';
 
-// Initialize OpenAI client with fallback to dummy key for development
+// Check for API key and log warning if missing
+if (!process.env.OPENAI_API_KEY) {
+  console.warn('WARNING: OPENAI_API_KEY environment variable is not set. OpenAI API calls will fail.');
+}
+
+// Initialize OpenAI client with the API key (no fallback)
 const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || 'sk-dummy-key-for-development',
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
 /**
