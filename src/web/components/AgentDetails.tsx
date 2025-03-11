@@ -268,15 +268,6 @@ const AgentDetails: React.FC<AgentDetailsProps> = ({ socket }) => {
           <p><strong>Description:</strong> {agent.description}</p>
         </div>
         
-        <div className="info-section">
-          <h2>Capabilities</h2>
-          <ul>
-            {agent.capabilities?.map((capability: string, index: number) => (
-              <li key={index}>{capability}</li>
-            ))}
-          </ul>
-        </div>
-        
         {agent.personalityProfile && (
           <div className="info-section">
             <h2>Personality Profile</h2>
