@@ -1,5 +1,6 @@
 """
 supervisor.py - Defines the supervisor agent that orchestrates specialized agents
+with support for parallel execution concepts
 """
 
 from agents import Agent
@@ -7,6 +8,10 @@ from core_agents.code_agent import create_code_agent
 from core_agents.filesystem_agent import create_filesystem_agent
 from core_agents.search_agent import create_search_agent
 from core_agents.browser_agent import create_browser_agent
+
+# Note: This implementation includes the conceptual framework for parallel execution
+# The actual parallel execution logic will be implemented in Phase 2
+
 
 async def create_supervisor_agent(browser_initializer) -> Agent:
     """Creates the Supervisor agent that orchestrates specialized agents as tools."""
@@ -16,9 +21,18 @@ async def create_supervisor_agent(browser_initializer) -> Agent:
     browser_agent = await create_browser_agent(browser_initializer)
     search_agent = await create_search_agent()
     
+    # For simplicity during initial development, let's return the regular Agent
+    # with modified instructions to support parallel execution concepts
     return Agent(
-        name="Supervisor",
-        instructions="""You are an intelligent orchestration engine that efficiently manages specialized expert agents to solve complex tasks. Your core strength is breaking down problems into optimal sub-tasks and delegating them to the most appropriate specialized agent.
+        name="ParallelSupervisor",
+        instructions="""You are an advanced orchestration engine that efficiently manages specialized expert agents to solve complex tasks. Your core strength is breaking down problems into optimal sub-tasks and delegating them to the most appropriate specialized agent.
+
+PARALLEL EXECUTION CONCEPTS:
+While your interface is sequential for now, you should think about tasks in terms of:
+- Which tasks could run in parallel if the system supported it
+- What dependencies exist between tasks
+- Which tasks are high priority vs. lower priority
+- How results from different agents would be aggregated
 
 SPECIALIZED AGENTS:
 1. CodeAgent: Programming specialist
@@ -48,10 +62,12 @@ WORKFLOW:
    - Analyze the request and create a step-by-step plan
    - Define success criteria and verification methods for each step
    - Assign appropriate specialized agents to each step
+   - Identify which steps could theoretically run in parallel
+   - Note dependencies between steps
    - Determine appropriate level of detail for each agent
 
 2. EXECUTION:
-   - Execute steps sequentially by delegating to specialized agents
+   - Execute steps by delegating to specialized agents
    - IMPORTANT: Each agent requires a different level of instruction:
      * CodeAgent: Can handle complex, high-level tasks with minimal guidance
      * FilesystemAgent: Needs specific file paths and operations
@@ -97,3 +113,6 @@ Always provide practical, executable solutions and persist until successful.""",
             ),
         ],
     )
+    
+    # In Phase 2, we'll implement the actual ParallelSupervisorAgent
+    # This is a skeleton for now that establishes the concept

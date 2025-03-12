@@ -283,7 +283,7 @@ async def main():
     input_items: List = []
 
     # Display welcome message with available functionality
-    welcome_msg = "\nSupervisor Agent ready. Type your request or 'exit' to quit."
+    welcome_msg = "\nParallel Supervisor Agent ready. Type your request or 'exit' to quit."
     if readline_available:
         welcome_msg += "\nUse up/down arrow keys to navigate command history."
     print(welcome_msg)
@@ -291,11 +291,27 @@ async def main():
     # Add a first message to the conversation to prime the agent
     input_items.append({
         "role": "system", 
-        "content": """IMPORTANT AGENT SELECTION GUIDELINES:
+        "content": """IMPORTANT AGENT SELECTION AND EXECUTION GUIDELINES:
 
+PARALLEL EXECUTION CAPABILITIES:
+- You can now execute multiple agent tasks in parallel
+- Use these tools to manage parallel execution:
+  * add_task: Queue a task for execution
+  * execute_all_tasks: Run all queued tasks in parallel
+  * get_result: Get results of a specific task
+  * aggregate_results: Combine results from multiple tasks
+  * cancel_task: Cancel a queued task that hasn't started
+
+TASK PRIORITIZATION AND DEPENDENCIES:
+- Assign priorities (HIGH, MEDIUM, LOW) to tasks
+- Define dependencies between tasks when needed
+- Independent tasks will execute in parallel
+- Dependent tasks will wait for prerequisites to complete
+
+AGENT SELECTION GUIDELINES:
 1. For web browsing and website interaction tasks:
    - ALWAYS delegate to browser_agent
-   - The browser_agent now has enhanced direct Playwright tools:
+   - The browser_agent has direct Playwright tools:
      * playwright_navigate: For navigating to pages with configurable options
      * playwright_click: For clicking elements using CSS selectors
      * playwright_fill: For filling form inputs
