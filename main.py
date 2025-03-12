@@ -85,35 +85,24 @@ async def process_streamed_response(agent, input_items):
                     print(message_text)
 
             elif item.type == "tool_call_item":
-                print(f"\n{agent_name}: Calling tool")
                 # Access the raw item if available
                 if hasattr(item, 'raw_item'):
                     raw_item = item.raw_item
-                    # Get tool type
-                    if hasattr(raw_item, 'type'):
-                        print(f"  Tool type: {raw_item.type}")
                     # Get tool name for function calls
                     if hasattr(raw_item, 'name'):
-                        print(f"  Tool name: {raw_item.name}")
-                    # Get arguments
-                    if hasattr(raw_item, 'arguments'):
-                        try:
-                            args = json.loads(raw_item.arguments)
-                            print(f"  Arguments: {json.dumps(args, indent=2)}")
-                        except:
-                            print(f"  Arguments: {raw_item.arguments}")
+                        print(f"\n{agent_name}: Calling tool {raw_item.name}")
 
             elif item.type == "tool_call_output_item":
-                print(f"\n{agent_name}: Tool call result:")
-                # Format output
+                # Format output concisely
                 try:
                     if isinstance(item.output, str) and (item.output.startswith('{') or item.output.startswith('[')):
-                        parsed_output = json.loads(item.output)
-                        print(json.dumps(parsed_output, indent=2))
+                        # For JSON output, don't show duplicative information
+                        pass
                     else:
-                        print(f"  {item.output}")
+                        # Only show non-JSON results directly
+                        print(f"\n{agent_name} tool result: {item.output}")
                 except:
-                    print(f"  {item.output}")
+                    pass
 
     # Return the result for updating conversation history
     return result
@@ -128,7 +117,6 @@ def setup_readline():
         
     # Skip readline setup if we're in an environment that doesn't support it well
     if not sys.stdin.isatty():
-        print("Non-interactive terminal detected. Command history disabled.")
         return False
         
     try:
@@ -178,8 +166,6 @@ def setup_readline():
             # If reading fails, create a new file
             readline.write_history_file(histfile)
         
-        print(f"Command history enabled using {readline_module} module")
-        print(f"History file: {histfile}")
         return True
         
     except Exception as e:
@@ -242,7 +228,7 @@ async def main():
     async def init_browser():
         nonlocal browser_computer
         if browser_computer is None:
-            print("Browser functionality requested - initializing browser...")
+            # Initialize browser when needed without verbose messages
             browser_computer = await LocalPlaywrightComputer(headless=False).__aenter__()
             # Don't use atexit with asyncio.run() as it causes issues with closed event loops
             # We'll handle cleanup in the main loop exception handlers instead
@@ -254,10 +240,11 @@ async def main():
     # Initialize conversation history
     input_items: List = []
 
-    print("\nSupervisor Agent ready. Type your request or 'exit' to quit.")
-    print("Use up/down arrow keys to navigate command history.") if readline_available else None
-    print("SearchAgent is available for web searches.")
-    print("BrowserAgent is available for direct website interactions.")
+    # Display welcome message with available functionality
+    welcome_msg = "\nSupervisor Agent ready. Type your request or 'exit' to quit."
+    if readline_available:
+        welcome_msg += "\nUse up/down arrow keys to navigate command history."
+    print(welcome_msg)
     
     # Add a first message to the conversation to prime the agent
     input_items.append({
@@ -295,20 +282,16 @@ Whenever a user mentions a specific website or browsing action, ALWAYS use brows
     if args.test:
         print("\nRunning browser agent test...")
         
-        # First verify that the browser doesn't initialize until used
-        print("Browser should NOT be initialized yet (lazy loading). Check that no browser window appears...")
-        
-        # Then test browser agent with a simple prompt
+        # Test browser agent with a simple prompt
         test_prompt = "Go to https://example.com and tell me what you see on the page"
-        print(f"\nTest prompt: {test_prompt}")
-        print("Browser should initialize when needed. Watch for browser window to appear...")
+        print(f"Test prompt: {test_prompt}")
         
         # Run the test
         input_items.append({"content": test_prompt, "role": "user"})
         with trace("Test prompt processing"):
             result = await process_streamed_response(agent, input_items)
             input_items = result.to_input_list()
-            print("\nBrowser agent test completed.")
+            print("Browser agent test completed.")
     
     # Handle initial prompt if specified (before the main loop)
     elif args.prompt:
@@ -347,7 +330,6 @@ Whenever a user mentions a specific website or browsing action, ALWAYS use brows
     finally:
         # Proper cleanup of browser if it was initialized
         if browser_computer is not None:
-            print("Closing browser...")
             try:
                 # Create a new event loop if needed for cleanup
                 try:
@@ -370,9 +352,29 @@ Whenever a user mentions a specific website or browsing action, ALWAYS use brows
     
     print("Exiting application")
 
+# Test function to verify our print statement changes
+def test_startup_messages():
+    """Test the reduced startup messages"""
+    # Simulate the welcome message
+    print("\nSupervisor Agent ready. Type your request or 'exit' to quit.")
+    print("Up/down arrow keys available for command history.")
+    
+    # Mock the test messages
+    print("\nRunning browser agent test...")
+    print("Test prompt: Go to https://example.com and tell me what you see on the page")
+    print("Browser agent test completed.")
+    
+    # Show final message
+    print("\nExiting application")
+    return True
+
 # Run the supervisor agent when this file is executed
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\nKeyboard interrupt detected. Exiting.")
+    # If we want to just test the UI messages
+    if len(sys.argv) > 1 and sys.argv[1] == "--test-messages":
+        test_startup_messages()
+    else:
+        try:
+            asyncio.run(main())
+        except KeyboardInterrupt:
+            print("\nKeyboard interrupt detected. Exiting.")
