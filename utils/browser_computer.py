@@ -226,7 +226,8 @@ def create_browser_tools(browser_computer):
     async def playwright_navigate(url: str, timeout: Optional[int] = None, 
                            waitUntil: Optional[str] = None, 
                            width: Optional[int] = None, 
-                           height: Optional[int] = None) -> str:
+                           height: Optional[int] = None,
+                           format: Optional[str] = None) -> str:
         """
         Navigate the browser to a specific URL with configurable options.
         
@@ -236,9 +237,10 @@ def create_browser_tools(browser_computer):
             waitUntil: Navigation wait condition (load, domcontentloaded, networkidle)
             width: Viewport width in pixels
             height: Viewport height in pixels
+            format: Optional format for content - "text" (default), "html", or "markdown"
         
         Returns:
-            A message indicating successful navigation
+            A message indicating successful navigation with page content
         """
         bc = browser_computer
         if not bc._page:
@@ -254,10 +256,11 @@ def create_browser_tools(browser_computer):
         print(f"Attempting to navigate to: {url}")
         
         # Handle optional parameters
-        nav_timeout = timeout if timeout is not None else 30000  # Increase default timeout to 30s
+        nav_timeout = timeout if timeout is not None else 10000  # Default timeout to 10s
         nav_waitUntil = waitUntil if waitUntil else "load"
+        content_format = format.lower() if format else "text"
         
-        print(f"Navigation parameters: timeout={nav_timeout}, waitUntil={nav_waitUntil}")
+        print(f"Navigation parameters: timeout={nav_timeout}, waitUntil={nav_waitUntil}, format={content_format}")
         
         # Update viewport if specified
         if width and height:
@@ -312,63 +315,114 @@ def create_browser_tools(browser_computer):
                 print(f"Error getting page title: {type(title_err).__name__}: {title_err}")
                 page_title = "Unknown title"  # Fallback
             
-            # Extract page content using BeautifulSoup - this approach is more reliable than evaluate
+            # Get HTML content directly - this method is more reliable than evaluate
             try:
-                # Get HTML content directly - this method is more reliable than evaluate
+                html_content = await bc._page.content()
+            except Exception as content_err:
+                print(f"Error getting page content: {type(content_err).__name__}: {content_err}")
+                return f"Navigated to: {current_url} - {page_title}\nUnable to extract page content."
+            
+            # Process based on requested format
+            if content_format == "html":
+                # Return HTML content
+                preview_html = html_content[:2000] + "..." if len(html_content) > 2000 else html_content
+                return f"Successfully navigated to: {current_url} - {page_title}\n\nHTML content:\n{preview_html}"
+                
+            elif content_format == "markdown":
                 try:
-                    html_content = await bc._page.content()
-                except Exception as content_err:
-                    print(f"Error getting page content: {type(content_err).__name__}: {content_err}")
-                    return f"Navigated to: {current_url} - {page_title}\nUnable to extract page content."
-                
-                # Parse with BeautifulSoup
-                soup = BeautifulSoup(html_content, 'html.parser')
-                
-                # Try to identify main content containers
-                main_content = None
-                
-                # Look for common content containers
-                for container in ['main', 'article', '#content', '.content', '#main', '.main']:
-                    elements = soup.select(container)
-                    if elements:
-                        main_content = elements[0]
-                        print(f"Found main content container: {container}")
-                        break
-                
-                # If no main content container found, use body
-                if not main_content:
-                    main_content = soup.body if soup.body else soup
-                
-                # Get meaningful text content
-                if main_content:
-                    # Remove scripts, styles, and hidden elements
+                    # Use BeautifulSoup to find the main content
+                    soup = BeautifulSoup(html_content, 'html.parser')
+                    
+                    # Try to get the main content area
+                    main_content = None
+                    for container in ['article', 'main', '#content', '.content', '#main', '.main']:
+                        elements = soup.select(container)
+                        if elements:
+                            main_content = elements[0]
+                            print(f"Found main content container for markdown: {container}")
+                            break
+                    
+                    # If no main content container found, use body
+                    if not main_content:
+                        main_content = soup.body if soup.body else soup
+                    
+                    # Remove scripts and styles
                     for script in main_content.find_all(['script', 'style']):
                         script.decompose()
                     
-                    # Get text content 
-                    text_content = main_content.get_text(separator='\n', strip=True)
+                    # Add title as heading
+                    title_md = f"# {page_title}\n\n" if page_title and page_title != "Unknown title" else ""
                     
-                    # Clean up the text
-                    lines = [line.strip() for line in text_content.split('\n') if line.strip()]
-                    text_content = '\n'.join(lines)
-                else:
-                    # Fallback if no meaningful content found
-                    text_content = soup.get_text(separator='\n', strip=True)
-                
-                # Truncate if too long
-                if len(text_content) > 2000:
-                    preview_text = text_content[:2000] + "...\n[Content truncated due to length]"
-                else:
-                    preview_text = text_content
-                
-                # For debugging
-                content_preview = text_content[:100] + "..." if len(text_content) > 100 else text_content
-                print(f"Content preview: {content_preview}")
-                
-                return f"Successfully navigated to: {current_url} - {page_title}\n\nPage content:\n{preview_text}"
-            except Exception as e:
-                print(f"Error processing page content: {type(e).__name__}: {e}")
-                return f"Successfully navigated to: {current_url} - {page_title}\nUnable to extract page content details."
+                    # Convert to markdown with improved settings
+                    md_content = markdownify(str(main_content), heading_style="ATX")
+                    
+                    # Clean up the markdown output
+                    md_content = re.sub(r'\n{3,}', '\n\n', md_content)  # Remove excessive newlines
+                    
+                    content = title_md + md_content
+                    
+                    # Truncate if too long
+                    if len(content) > 5000:
+                        preview_content = content[:5000] + "\n\n[Content truncated due to length]"
+                    else:
+                        preview_content = content
+                    
+                    return f"Successfully navigated to: {current_url}\n\n{preview_content}"
+                except Exception as md_err:
+                    print(f"Error converting to markdown: {type(md_err).__name__}: {md_err}")
+                    return f"Successfully navigated to: {current_url} - {page_title}\nUnable to convert content to markdown: {md_err}"
+            
+            else:  # Default to text format
+                # Extract page content using BeautifulSoup - this approach is more reliable than evaluate
+                try:
+                    # Parse with BeautifulSoup
+                    soup = BeautifulSoup(html_content, 'html.parser')
+                    
+                    # Try to identify main content containers
+                    main_content = None
+                    
+                    # Look for common content containers
+                    for container in ['main', 'article', '#content', '.content', '#main', '.main']:
+                        elements = soup.select(container)
+                        if elements:
+                            main_content = elements[0]
+                            print(f"Found main content container: {container}")
+                            break
+                    
+                    # If no main content container found, use body
+                    if not main_content:
+                        main_content = soup.body if soup.body else soup
+                    
+                    # Get meaningful text content
+                    if main_content:
+                        # Remove scripts, styles, and hidden elements
+                        for script in main_content.find_all(['script', 'style']):
+                            script.decompose()
+                        
+                        # Get text content 
+                        text_content = main_content.get_text(separator='\n', strip=True)
+                        
+                        # Clean up the text
+                        lines = [line.strip() for line in text_content.split('\n') if line.strip()]
+                        text_content = '\n'.join(lines)
+                    else:
+                        # Fallback if no meaningful content found
+                        text_content = soup.get_text(separator='\n', strip=True)
+                    
+                    # Truncate if too long
+                    if len(text_content) > 2000:
+                        preview_text = text_content[:2000] + "...\n[Content truncated due to length]"
+                    else:
+                        preview_text = text_content
+                    
+                    # For debugging
+                    content_preview = text_content[:100] + "..." if len(text_content) > 100 else text_content
+                    print(f"Content preview: {content_preview}")
+                    
+                    return f"Successfully navigated to: {current_url} - {page_title}\n\nPage content:\n{preview_text}"
+                except Exception as e:
+                    print(f"Error processing page content: {type(e).__name__}: {e}")
+                    return f"Successfully navigated to: {current_url} - {page_title}\nUnable to extract page content details."
         except Exception as e:
             print(f"Navigation error: {type(e).__name__}: {e}")
             return f"Error navigating to {url}: {e}"
@@ -435,7 +489,10 @@ def create_browser_tools(browser_computer):
         Click an element on the page.
         
         Args:
-            selector: CSS selector for the element to click
+            selector: CSS selector for the element to click. Can use:
+                    - Standard CSS selectors: "#id", ".class", "tag"
+                    - Attribute selectors: "[type='submit']"
+                    - Text selectors: "text=Click me" (element containing this text)
         
         Returns:
             Message indicating success or failure
@@ -445,12 +502,63 @@ def create_browser_tools(browser_computer):
             return "Error: Browser is not initialized or no page is currently open"
         
         try:
-            # Wait for selector to be visible
-            await bc._page.wait_for_selector(selector, state="visible", timeout=5000)
-            # Click the element
-            await bc._page.click(selector)
-            return f"Successfully clicked element: {selector}"
+            print(f"Attempting to click element with selector: {selector}")
+            
+            # Special case for text-based selection if selector doesn't look like CSS
+            if selector.startswith("text=") or not any(char in selector for char in "[]().#:>+~"):
+                try:
+                    # Try clicking by text content directly (most reliable)
+                    if selector.startswith("text="):
+                        text_content = selector[5:]  # Remove 'text=' prefix
+                    else:
+                        text_content = selector  # Use the whole selector as text
+                        
+                    print(f"Interpreting as text selector: '{text_content}'")
+                    
+                    # Try to use locator API first (newer Playwright versions)
+                    try:
+                        await bc._page.get_by_text(text_content).click(timeout=5000)
+                        return f"Successfully clicked element containing text: '{text_content}'"
+                    except Exception as text_err:
+                        print(f"Text-based click failed with get_by_text: {text_err}")
+                        
+                        # If that fails, try using the older text selector
+                        await bc._page.click(f"text={text_content}", timeout=5000)
+                        return f"Successfully clicked element containing text: '{text_content}'"
+                except Exception as e:
+                    print(f"Text-based click failed: {e}")
+                    # Will fall back to standard selector approach
+            
+            # Standard selector approach (works with CSS selectors)
+            try:
+                # Wait for selector to be visible
+                await bc._page.wait_for_selector(selector, state="visible", timeout=5000)
+                # Click the element
+                await bc._page.click(selector, timeout=5000)
+                return f"Successfully clicked element: {selector}"
+            except Exception as selector_err:
+                print(f"Standard selector click failed: {selector_err}")
+                
+                # Try JavaScript click as a fallback
+                try:
+                    print("Attempting JavaScript click as fallback")
+                    await bc._page.evaluate(f'''
+                        (selector) => {{
+                            const element = document.querySelector(selector);
+                            if (element) {{
+                                element.click();
+                                return true;
+                            }}
+                            return false;
+                        }}
+                    ''', selector)
+                    return f"Successfully clicked element using JavaScript fallback: {selector}"
+                except Exception as js_err:
+                    print(f"JavaScript click fallback failed: {js_err}")
+                    return f"Error clicking element '{selector}': {selector_err}\nJavaScript fallback also failed: {js_err}"
+                
         except Exception as e:
+            print(f"Click operation failed: {e}")
             return f"Error clicking element '{selector}': {e}"
     
     @function_tool
@@ -996,89 +1104,122 @@ def create_browser_tools(browser_computer):
         except Exception as e:
             return f"Error executing DELETE request: {e}"
     
-    # Legacy tool for backward compatibility
+    # No legacy navigate function - functionality merged into playwright_navigate
+    
     @function_tool
-    async def navigate(url: str, return_content: Optional[bool] = None, format: Optional[str] = None) -> str:
+    async def playwright_get_elements(selectors: Optional[str] = None) -> str:
         """
-        Navigate the browser to a specific URL and optionally return page content.
-        DEPRECATED: Use playwright_navigate instead for more direct control.
+        Get a list of interactive elements on the page to help with selecting elements.
         
         Args:
-            url: The URL to navigate to (should start with http:// or https://)
-            return_content: Whether to return the page content (True or False)
-            format: The format to return content in - "text", "html", or "markdown"
+            selectors: Optional CSS selectors to search for (default: common interactive elements)
         
         Returns:
-            A message indicating successful navigation and optionally the page content
+            A list of element details including tag, ID, class, and text content
         """
-        if not url:
-            return "Error: URL parameter is required"
+        bc = browser_computer
+        if not bc._page:
+            return "Error: Browser is not initialized or no page is currently open"
         
-        # Ensure URL has a protocol
-        if not url.startswith(("http://", "https://")):
-            url = "https://" + url
-        
-        # Navigate to the URL using the playwright_navigate tool
-        nav_result = await playwright_navigate(url)
-        
-        # Base success message
-        message = f"Successfully navigated to {url}. Consider using playwright_* tools for direct control."
-        
-        # Set defaults if None
-        if return_content is None:
-            return_content = False
-        if format is None:
-            format = "text"
+        try:
+            print("Finding elements on page")
             
-        # Optionally get and return the page content
-        if return_content:
-            bc = browser_computer
-            if not bc._page:
-                return "Error: Browser is not initialized or no page is currently open."
+            # Default to common interactive elements if no selectors provided
+            element_selectors = selectors if selectors else "button, a, input, select, textarea, [role='button']"
             
-            try:
-                # Get the current URL for reference
-                current_url = await bc._page.url()
+            # Get elements with their key properties
+            elements = await bc._page.evaluate(f'''
+                () => {{
+                    const elements = document.querySelectorAll("{element_selectors}");
+                    return Array.from(elements).map(el => {{
+                        // Get computed styles to check visibility
+                        const style = window.getComputedStyle(el);
+                        const isVisible = style.display !== 'none' && 
+                                        style.visibility !== 'hidden' && 
+                                        style.opacity !== '0';
+                        
+                        // Get element position if visible
+                        let rect = null;
+                        if (isVisible) {{
+                            const boundingRect = el.getBoundingClientRect();
+                            if (boundingRect.width > 0 && boundingRect.height > 0) {{
+                                rect = {{
+                                    x: boundingRect.x,
+                                    y: boundingRect.y,
+                                    width: boundingRect.width,
+                                    height: boundingRect.height
+                                }};
+                            }}
+                        }}
+                        
+                        // Return element details
+                        return {{
+                            tag: el.tagName.toLowerCase(),
+                            id: el.id || null,
+                            classes: el.className || null,
+                            type: el.type || null,
+                            name: el.name || null,
+                            value: el.value || null,
+                            text: el.textContent?.trim().substring(0, 100) || null,
+                            isVisible: isVisible && rect !== null,
+                            href: el.href || null,
+                            position: rect,
+                            attributes: Array.from(el.attributes)
+                                .filter(attr => !['id', 'class', 'style'].includes(attr.name))
+                                .map(attr => `${attr.name}="${attr.value}"`)
+                                .join(' ')
+                        }};
+                    }});
+                }}
+            ''')
+            
+            # Filter out empty or invisible elements and generate selectors
+            visible_elements = [el for el in elements if el.get('isVisible', False)]
+            
+            # Format the results in a human-readable way
+            results = ["# Interactive Elements Found on Page", ""]
+            
+            if not visible_elements:
+                results.append("No visible interactive elements found with selector: " + element_selectors)
+            else:
+                results.append(f"Found {len(visible_elements)} visible interactive elements:")
                 
-                if format.lower() == "html":
-                    content = await bc._page.content()
-                    return f"Page HTML content from {current_url}:\n{content}"
-                elif format.lower() == "markdown":
-                    # Get the HTML content for conversion to markdown
-                    html_content = await bc._page.content()
+                for i, el in enumerate(visible_elements, 1):
+                    # Generate useful selectors for this element
+                    selectors = []
                     
-                    # Get the title
-                    title = await bc._page.title()
-                    title_md = f"# {title}\n\n" if title else ""
+                    if el.get('id'):
+                        selectors.append(f"#{el.get('id')}")
+                        
+                    if el.get('text') and len(el.get('text').strip()) > 0 and len(el.get('text').strip()) < 50:
+                        selectors.append(f"text={el.get('text').strip()}")
                     
-                    # Define a synchronous function for the conversion
-                    def convert_html_to_markdown(html):
-                        # Use BeautifulSoup to find the main content
-                        soup = BeautifulSoup(html, 'html.parser')
+                    if el.get('tag') == 'a' and el.get('href'):
+                        selectors.append(f"a[href='{el.get('href').split('?')[0]}']")
                         
-                        # Try to get the main content area
-                        main_content = soup.find('article') or soup.find('main') or soup.find('body')
-                        
-                        # Convert to markdown with improved settings
-                        md_content = markdownify(str(main_content), heading_style="ATX")
-                        
-                        # Clean up the markdown output
-                        md_content = re.sub(r'\n{3,}', '\n\n', md_content)  # Remove excessive newlines
-                        
-                        return md_content
+                    if el.get('tag') == 'button' or el.get('type') == 'submit':
+                        selectors.append(f"{el.get('tag')}[type='{el.get('type')}']")
                     
-                    # Run the conversion in a separate thread to avoid blocking
-                    md_content = await asyncio.to_thread(convert_html_to_markdown, html_content)
-                    content = title_md + md_content
+                    # Format element details
+                    line = f"## {i}. {el.get('tag', 'unknown')}"
+                    if el.get('type'):
+                        line += f" (type={el.get('type')})"
+                    results.append(line)
                     
-                    return f"Page content (Markdown) from {current_url}:\n{content}"
-                else:  # Default to text
-                    content = await bc._page.evaluate('() => document.body.innerText')
-                    return f"Page text content from {current_url}:\n{content}"
-            except Exception as e:
-                return f"Error retrieving page content: {e}"
-        
-        return message
+                    if el.get('text'):
+                        results.append(f"   Text: \"{el.get('text')}\"")
+                        
+                    if selectors:
+                        results.append(f"   Selectors to use:")
+                        for selector in selectors:
+                            results.append(f"   - `{selector}`")
+                            
+                    results.append("")  # Add a blank line between elements
+            
+            return "\n".join(results)
+        except Exception as e:
+            print(f"Error getting page elements: {e}")
+            return f"Error getting page elements: {e}"
     
     @function_tool
     async def playwright_get_text(selector: Optional[str] = None, 
@@ -1188,11 +1329,11 @@ def create_browser_tools(browser_computer):
         "playwright_hover": playwright_hover,
         "playwright_evaluate": playwright_evaluate,
         "playwright_get_text": playwright_get_text,
+        "playwright_get_elements": playwright_get_elements,
         "playwright_close": playwright_close,
         "playwright_get": playwright_get,
         "playwright_post": playwright_post,
         "playwright_put": playwright_put,
         "playwright_patch": playwright_patch,
-        "playwright_delete": playwright_delete,
-        "navigate": navigate
+        "playwright_delete": playwright_delete
     }
