@@ -22,13 +22,13 @@ python -m playwright install
 
 ```bash
 # Run the application
-python supervisor.py
+python main.py
 
 # Run with test to verify browser functionality
-python supervisor.py -t
+python main.py -t
 
 # Run with initial prompt
-python supervisor.py -p "your prompt here"
+python main.py -p "your prompt here"
 ```
 
 ## Core Agents
