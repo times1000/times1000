@@ -280,20 +280,56 @@ def create_browser_tools(browser_computer):
             page_title = await bc._page.title()
             print(f"Page title: {page_title}")
             
-            # Get page content using a different method
+            # Extract page content using BeautifulSoup
             try:
-                # Try getting content directly
-                content = await bc._page.content()
+                # Get content using reliable HTML content method
+                html_content = await bc._page.content()
                 
-                # Parse with BeautifulSoup to get visible text
-                soup = BeautifulSoup(content, 'html.parser')
-                text_content = soup.get_text(separator='\n', strip=True)
+                # Parse with BeautifulSoup
+                soup = BeautifulSoup(html_content, 'html.parser')
                 
-                # Preview
+                # Try to identify main content containers
+                main_content = None
+                
+                # Look for common content containers
+                for container in ['main', 'article', '#content', '.content', '#main', '.main']:
+                    elements = soup.select(container)
+                    if elements:
+                        main_content = elements[0]
+                        print(f"Found main content container: {container}")
+                        break
+                
+                # If no main content container found, use body
+                if not main_content:
+                    main_content = soup.body if soup.body else soup
+                
+                # Get meaningful text content
+                if main_content:
+                    # Remove scripts, styles, and hidden elements
+                    for script in main_content.find_all(['script', 'style']):
+                        script.decompose()
+                    
+                    # Get text content
+                    text_content = main_content.get_text(separator='\n', strip=True)
+                    
+                    # Clean up the text
+                    lines = [line.strip() for line in text_content.split('\n') if line.strip()]
+                    text_content = '\n'.join(lines)
+                else:
+                    # Fallback if no meaningful content found
+                    text_content = soup.get_text(separator='\n', strip=True)
+                
+                # Truncate if too long
+                if len(text_content) > 2000:
+                    preview_text = text_content[:2000] + "...\n[Content truncated due to length]"
+                else:
+                    preview_text = text_content
+                
+                # For debugging
                 content_preview = text_content[:100] + "..." if len(text_content) > 100 else text_content
                 print(f"Content preview: {content_preview}")
                 
-                return f"Successfully navigated to: {current_url} - {page_title}\n\nPage content:\n{text_content}"
+                return f"Successfully navigated to: {current_url} - {page_title}\n\nPage content:\n{preview_text}"
             except Exception as e:
                 print(f"Error getting page content: {type(e).__name__}: {e}")
                 return f"Successfully navigated to: {current_url} - {page_title}"
@@ -506,48 +542,64 @@ def create_browser_tools(browser_computer):
         try:
             print(f"Executing script: {script}")
             
-            # Make sure the script is properly formatted for evaluation
-            if not script.strip().startswith("function") and not "=>" in script:
-                # Wrap non-function scripts with a function
-                eval_script = f"() => {{ {script} }}"
-                print(f"Rewriting script as: {eval_script}")
-            else:
-                eval_script = script
-            
-            # Execute the script
+            # Execute script using a reliable approach with addScriptTag
             try:
-                result = await bc._page.evaluate(eval_script)
-                print(f"Script execution result: {result}")
+                # Create a unique global variable to store the result
+                result_var = f"__playwright_result_{int(asyncio.get_event_loop().time() * 1000)}"
+                
+                # Prepare a script that assigns the result to our global variable
+                wrapped_script = f"""
+                try {{
+                    window.{result_var} = (function() {{
+                        {script}
+                    }})();
+                }} catch (e) {{
+                    window.{result_var} = {{ error: e.toString() }};
+                }}
+                """
+                
+                # Add the script to the page
+                await bc._page.add_script_tag(content=wrapped_script)
+                
+                # Retrieve the result from the global variable
+                js_result = await bc._page.evaluate(f"() => window.{result_var}")
+                
+                # Clean up the global variable
+                await bc._page.evaluate(f"() => {{ delete window.{result_var}; }}")
+                
+                # Check if we got an error
+                if isinstance(js_result, dict) and 'error' in js_result:
+                    return f"JavaScript error: {js_result['error']}"
                 
                 # Format the result for readability
-                if result is None:
+                if js_result is None:
                     return "Script executed successfully (no return value)"
                 
-                if isinstance(result, (dict, list)):
+                if isinstance(js_result, (dict, list)):
                     import json
-                    return f"Script result:\n{json.dumps(result, indent=2)}"
+                    return f"Script result:\n{json.dumps(js_result, indent=2)}"
                 
-                return f"Script result: {result}"
+                return f"Script result: {js_result}"
             except Exception as e:
-                print(f"Error in page.evaluate: {type(e).__name__}: {e}")
-                # Try a different approach
+                print(f"Script execution error: {type(e).__name__}: {e}")
+                
+                # Try another approach - this time with just a simple eval
                 try:
-                    print("Trying alternative execution method...")
-                    await bc._page.add_script_tag(content=f"window.__scriptResult = (function() {{ {script} }})();")
-                    result = await bc._page.evaluate("() => window.__scriptResult")
-                    print(f"Alternative execution result: {result}")
-                    
-                    if result is None:
-                        return "Script executed successfully (no return value)"
-                    
-                    if isinstance(result, (dict, list)):
-                        import json
-                        return f"Script result:\n{json.dumps(result, indent=2)}"
-                    
-                    return f"Script result: {result}"
+                    # For simple statements, try direct evaluation
+                    if "return" not in script and ";" not in script and len(script.strip().split("\n")) == 1:
+                        simple_result = await bc._page.evaluate(f"() => {{{script}}}")
+                        return f"Script result: {simple_result}"
                 except Exception as e2:
-                    print(f"Error in alternative execution: {type(e2).__name__}: {e2}")
-                    return f"Error executing script: {e} (tried alternate methods)"
+                    print(f"Simple evaluation error: {type(e2).__name__}: {e2}")
+                
+                # Final fallback - try executing without returning a result
+                try:
+                    await bc._page.evaluate(f"() => {{ {script} }}")
+                    return "Script executed successfully (result unavailable)"
+                except Exception as e3:
+                    print(f"Fallback execution error: {type(e3).__name__}: {e3}")
+                    return f"Error executing script: {e}"
+                    
         except Exception as e:
             print(f"General script execution error: {type(e).__name__}: {e}")
             return f"Error executing script: {e}"
@@ -845,12 +897,16 @@ def create_browser_tools(browser_computer):
         return message
     
     @function_tool
-    async def playwright_get_text(selector: Optional[str] = None) -> str:
+    async def playwright_get_text(selector: Optional[str] = None, 
+                           includeHtml: Optional[bool] = None,
+                           maxLength: Optional[int] = None) -> str:
         """
-        Get text content from the current page or a specific element.
+        Get text content from the current page or a specific element with advanced options.
         
         Args:
             selector: Optional CSS selector for a specific element
+            includeHtml: Whether to include HTML structure info (default: False)
+            maxLength: Maximum content length to return (default: 5000)
             
         Returns:
             The text content from the current page or element
@@ -859,32 +915,80 @@ def create_browser_tools(browser_computer):
         if not bc._page:
             return "Error: Browser is not initialized or no page is currently open"
         
+        # Set defaults
+        include_html = includeHtml if includeHtml is not None else False
+        max_length = maxLength if maxLength is not None else 5000
+        
         try:
             print(f"Getting text content. Selector: {selector if selector else 'entire page'}")
             
             # Get page content using content() method
             html = await bc._page.content()
+            current_url = await bc._page.url()
             
             # Parse with BeautifulSoup
             soup = BeautifulSoup(html, 'html.parser')
             
-            # If selector is provided, get text from that element
+            # Get page title
+            page_title = soup.title.string if soup.title else "No title"
+            
+            # If selector is provided, get content from that element
             if selector:
                 # Find element in the soup
                 element = soup.select_one(selector)
                 if not element:
                     return f"Error: Element not found with selector '{selector}'"
                 
-                # Get text from the element
-                text_content = element.get_text(separator='\n', strip=True)
+                # Clean up the element
+                for script in element.find_all(['script', 'style']):
+                    script.decompose()
+                
+                # Get content from the element
+                if include_html:
+                    content = str(element)
+                else:
+                    text_content = element.get_text(separator='\n', strip=True)
+                    # Clean up the text
+                    lines = [line.strip() for line in text_content.split('\n') if line.strip()]
+                    content = '\n'.join(lines)
             else:
-                # Get text from whole page
-                text_content = soup.get_text(separator='\n', strip=True)
+                # Get content from whole page, focusing on main content
+                
+                # Try to identify main content containers
+                main_content = None
+                
+                # Look for common content containers
+                for container in ['main', 'article', '#content', '.content', '#main', '.main']:
+                    elements = soup.select(container)
+                    if elements:
+                        main_content = elements[0]
+                        print(f"Found main content container: {container}")
+                        break
+                
+                # If no main content container found, use body
+                if not main_content:
+                    main_content = soup.body if soup.body else soup
+                
+                # Clean up the content
+                for script in main_content.find_all(['script', 'style']):
+                    script.decompose()
+                
+                # Get content
+                if include_html:
+                    content = str(main_content)
+                else:
+                    text_content = main_content.get_text(separator='\n', strip=True)
+                    # Clean up the text
+                    lines = [line.strip() for line in text_content.split('\n') if line.strip()]
+                    content = '\n'.join(lines)
             
-            # Get page title
-            title = soup.title.string if soup.title else "No title"
+            # Truncate if too long
+            if len(content) > max_length:
+                truncated_content = content[:max_length] + f"\n\n[Content truncated. Total length: {len(content)} characters]"
+            else:
+                truncated_content = content
             
-            return f"Page: {title}\n\nContent:\n{text_content}"
+            return f"Page: {page_title}\nURL: {current_url}\n\nContent:\n{truncated_content}"
         except Exception as e:
             print(f"Error getting text content: {type(e).__name__}: {e}")
             return f"Error getting text content: {e}"
