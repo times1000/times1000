@@ -1,3 +1,4 @@
 openai-agents
 rich>=13.0.0
 gnureadline>=6.3.8; platform_system == "Darwin"  # macOS only dependency for better readline support
+playwright>=1.40.0

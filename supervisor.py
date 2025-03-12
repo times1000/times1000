@@ -18,7 +18,8 @@ import subprocess
 import json
 import asyncio
 import atexit
-from typing import Optional, List
+import contextlib
+from typing import Optional, List, AsyncContextManager
 
 # Platform-specific readline setup
 try:
@@ -40,9 +41,53 @@ except ImportError:
 
 from agents import Agent, Runner, WebSearchTool, ItemHelpers, MessageOutputItem
 from agents import ToolCallItem, ToolCallOutputItem, function_tool, trace
+from agents import ComputerTool, ModelSettings
 
 from rich.markdown import Markdown
 from rich.console import Console
+
+# Import our browser computer implementation
+from browser_computer import LocalPlaywrightComputer
+
+# Browser computer manager
+class BrowserComputerManager:
+    """Manages a LocalPlaywrightComputer instance for the application."""
+    
+    def __init__(self):
+        self._computer = None
+        
+    async def get_computer(self) -> AsyncContextManager[LocalPlaywrightComputer]:
+        """
+        Returns a context manager for a LocalPlaywrightComputer.
+        The computer will be created if it doesn't exist yet.
+        """
+        if self._computer is None:
+            self._computer = LocalPlaywrightComputer(
+                headless=False,
+                browser_type="chromium",
+                start_url="https://www.google.com"
+            )
+            
+        @contextlib.asynccontextmanager
+        async def _computer_context():
+            try:
+                # Enter the computer's context
+                computer = await self._computer.__aenter__()
+                yield computer
+            finally:
+                # We don't exit the context here to keep the browser open
+                pass
+                
+        return _computer_context()
+    
+    async def close(self):
+        """Close the browser if it's open."""
+        if self._computer is not None:
+            await self._computer.__aexit__(None, None, None)
+            self._computer = None
+
+# Create a singleton instance
+browser_manager = BrowserComputerManager()
 
 # Define custom tools
 @function_tool
@@ -159,15 +204,31 @@ SELF-SUFFICIENCY PRINCIPLES:
     tools=[run_shell_command],
 )
 
-web_agent = Agent(
-    name="WebAgent",
-    instructions="""You are a web search expert specializing in finding information online.
+async def create_web_agent():
+    """Creates the web agent with browser capabilities."""
+    # Get a computer instance from the manager
+    async with await browser_manager.get_computer() as computer:
+        # Create the agent with both web search and computer tools
+        return Agent(
+            name="WebAgent",
+            instructions="""You are a web expert specializing in finding information online and interacting with websites.
+
+CAPABILITIES:
+1. Web Search: Find information using web search queries
+2. Browser Interaction: Navigate and interact with web pages directly
 
 When searching for information:
-1. Formulate effective search queries
-2. Find relevant, up-to-date information from authoritative sources
-3. Summarize findings concisely
-4. Provide links to original sources
+- Formulate effective search queries
+- Find relevant, up-to-date information from authoritative sources
+- Summarize findings concisely
+- Provide links to original sources
+
+When interacting with websites:
+- Navigate to specific URLs
+- Click on elements, fill out forms, and interact with content
+- Scroll and navigate through pages
+- Capture visual information from websites
+- Extract data from web pages
 
 TOOLS AND USAGE:
 WebSearchTool:
@@ -175,20 +236,42 @@ WebSearchTool:
 - Returns search results with titles, descriptions, and URLs
 - Use for finding documentation, tutorials, examples, and technical answers
 
+ComputerTool:
+- Controls a web browser to interact with websites
+- Captures screenshots to see website content
+- Can click, type, scroll, and navigate within web pages
+- Perfect for more complex interactions beyond simple searches
+- Use for research that requires navigating through multiple pages
+
+STRATEGY:
+1. For simple information queries, use WebSearchTool
+2. For complex interactions or when search results aren't sufficient, use ComputerTool
+3. Combine both tools for comprehensive research tasks
+
 SELF-SUFFICIENCY PRINCIPLES:
 1. Gather thorough information without requiring user refinement
-2. Try diverse search queries to explore topics from multiple angles
-3. Reformulate queries when initial searches aren't productive
-4. Filter results to identify the most relevant information
+2. Try diverse search queries and web navigation approaches
+3. Reformulate queries or change navigation strategies when initial attempts aren't productive
+4. Extract the most relevant information from search results and web pages
 5. Only request user input as a last resort
-    """,
-    handoff_description="A specialized agent for web searches and information gathering",
-    tools=[WebSearchTool()],
-)
+            """,
+            handoff_description="A specialized agent for web searches and website interaction",
+            tools=[WebSearchTool(), ComputerTool(computer)],
+            # Use computer-use-preview model when using ComputerTool
+            model="computer-use-preview",
+            model_settings=ModelSettings(truncation="auto"),
+        )
+
+# Create a placeholder for the web agent
+web_agent = None  # Will be initialized in main()
 
 # Create the supervisor agent with specialized agents as tools
-def create_supervisor_agent() -> Agent:
+async def create_supervisor_agent() -> Agent:
     """Creates the Supervisor agent that orchestrates specialized agents as tools."""
+    # Create web agent with browser capabilities
+    global web_agent
+    web_agent = await create_web_agent()
+    
     return Agent(
         name="Supervisor",
         instructions="""You are a coding assistant that delegates specialized tasks to expert agents.
@@ -200,8 +283,10 @@ AVAILABLE AGENTS:
 2. FilesystemAgent: For file system operations and project organization
    Tools: run_shell_command (for directories, file operations, system queries)
 
-3. WebAgent: For searching the web and finding information
-   Tools: WebSearchTool
+3. WebAgent: For searching the web and interacting with websites
+   Tools: 
+   - WebSearchTool: For finding information through web searches
+   - ComputerTool: For direct browser interaction and navigation
 
 WORKFLOW:
 1. PLANNING:
@@ -213,6 +298,7 @@ WORKFLOW:
    - Execute steps sequentially by delegating to specialized agents
    - IMPORTANT: Never implement code changes yourself - always delegate to CodeAgent
    - Clearly explain to CodeAgent what changes are needed and let it handle implementation
+   - For web research, use WebAgent with both search and browser capabilities
    - Verify each step's success before proceeding
    - Adjust approach or revise plan if a step fails
 
@@ -241,7 +327,7 @@ Always provide practical, executable solutions and persist until successful.""",
             ),
             web_agent.as_tool(
                 tool_name="web_agent",
-                tool_description="Delegate web searches to a specialized web search agent",
+                tool_description="Delegate web searches and browser interactions to a specialized web agent",
             ),
         ],
     )
@@ -419,40 +505,48 @@ async def main():
     # Setup readline for command history
     readline_available = setup_readline()
     
-    agent = create_supervisor_agent()
-    # Initialize conversation history
-    input_items: List = []
-
     try:
+        # Create the supervisor agent (which will also create the web agent with browser)
+        agent = await create_supervisor_agent()
+        # Initialize conversation history
+        input_items: List = []
+    
         print("\nSupervisor Agent ready. Type your request or 'exit' to quit.")
         print("Use up/down arrow keys to navigate command history.") if readline_available else None
+        print("Browser-enabled WebAgent is available for web interactions.")
         
-        while True:
-            try:
-                # Use appropriate input method
-                user_input = safe_input("\n> ", readline_available)
-                
-                # Check for exit command
-                if user_input.lower() in ('exit', 'quit'):
-                    print("Exiting Supervisor Agent")
-                    break
+        try:
+            while True:
+                try:
+                    # Use appropriate input method
+                    user_input = safe_input("\n> ", readline_available)
                     
-                if user_input.strip():
-                    # Add user input to conversation history
-                    input_items.append({"content": user_input, "role": "user"})
-
-                    # Process streamed response
-                    with trace("Task processing"):
-                        result = await process_streamed_response(agent, input_items)
-
-                        # Update input items with the result for the next iteration
-                        input_items = result.to_input_list()
-            except Exception as e:
-                print(f"\nError processing input: {str(e)}")
-                continue
-
-    except KeyboardInterrupt:
-        print("\nExiting Supervisor Agent")
+                    # Check for exit command
+                    if user_input.lower() in ('exit', 'quit'):
+                        print("Exiting Supervisor Agent")
+                        break
+                        
+                    if user_input.strip():
+                        # Add user input to conversation history
+                        input_items.append({"content": user_input, "role": "user"})
+    
+                        # Process streamed response
+                        with trace("Task processing"):
+                            result = await process_streamed_response(agent, input_items)
+    
+                            # Update input items with the result for the next iteration
+                            input_items = result.to_input_list()
+                except Exception as e:
+                    print(f"\nError processing input: {str(e)}")
+                    continue
+    
+        except KeyboardInterrupt:
+            print("\nExiting Supervisor Agent")
+    finally:
+        # Clean up browser resources
+        print("Closing browser...")
+        await browser_manager.close()
+        print("Browser closed.")
 
 # Run the supervisor agent when this file is executed
 if __name__ == "__main__":
