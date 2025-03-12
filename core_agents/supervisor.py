@@ -37,11 +37,11 @@ SPECIALIZED AGENTS:
    • Perfect for: Finding documentation, research, verifying facts
 
 4. BrowserAgent: Website interaction specialist
-   • Capabilities: Website navigation, clicking, typing, scrolling, screenshots
-   • Tools: NavigateTool (for URL navigation) and ComputerTool (for interactions)
-   • Perfect for: Direct website interactions, form filling, UI exploration
+   • Capabilities: Website navigation, clicking, typing, form filling, HTTP requests, JavaScript execution
+   • Tools: Direct Playwright tools (playwright_navigate, playwright_click, etc.) with ComputerTool as backup
+   • Perfect for: Direct website interactions, form filling, UI exploration, API requests
    • IMPORTANT: ALWAYS use for ANY website interaction request
-   • NOTE: Always use NavigateTool first for changing pages
+   • NOTE: Always uses direct playwright_* tools for better speed and reliability
 
 WORKFLOW:
 1. PLANNING:
@@ -93,7 +93,7 @@ Always provide practical, executable solutions and persist until successful.""",
             ),
             browser_agent.as_tool(
                 tool_name="browser_agent",
-                tool_description="Delegate website interactions to a specialized browser agent that can navigate to URLs, take screenshots, click, type, and interact with web pages",
+                tool_description="Delegate website interactions to a specialized browser agent with direct Playwright tools for navigation, clicking, form filling, screenshots, HTTP requests, and JavaScript execution",
             ),
         ],
     )

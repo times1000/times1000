@@ -5,9 +5,10 @@ Provides browser automation capabilities for agents to interact with web pages.
 
 import asyncio
 import base64
-from typing import Literal, Optional, Union, List, Dict
+import os
+from typing import Literal, Optional, Union, List, Dict, Any
 
-from playwright.async_api import async_playwright, Browser, Page, Playwright
+from playwright.async_api import async_playwright, Browser, Page, Playwright, BrowserContext
 from markdownify import markdownify
 from bs4 import BeautifulSoup
 import re
@@ -217,14 +218,554 @@ class LocalPlaywrightComputer(AsyncComputer):
         await self.goto(url)
 
 
-# Create a navigation tool function using the function_tool decorator
-def create_navigate_tool(browser_computer):
-    """Create a navigation tool for the browser"""
+# Create tools for direct Playwright functionality
+def create_browser_tools(browser_computer):
+    """Create direct Playwright tools for the browser"""
     
+    @function_tool
+    async def playwright_navigate(url: str, timeout: Optional[int] = None, 
+                           waitUntil: Optional[str] = None, 
+                           width: Optional[int] = None, 
+                           height: Optional[int] = None) -> str:
+        """
+        Navigate the browser to a specific URL with configurable options.
+        
+        Args:
+            url: The URL to navigate to (should start with http:// or https://)
+            timeout: Navigation timeout in milliseconds (default: 10000)
+            waitUntil: Navigation wait condition (load, domcontentloaded, networkidle)
+            width: Viewport width in pixels
+            height: Viewport height in pixels
+        
+        Returns:
+            A message indicating successful navigation
+        """
+        bc = browser_computer
+        if not bc._page:
+            return "Error: Browser is not initialized"
+            
+        if not url:
+            return "Error: URL parameter is required"
+        
+        # Ensure URL has a protocol
+        if not url.startswith(("http://", "https://")):
+            url = "https://" + url
+            
+        print(f"Attempting to navigate to: {url}")
+        
+        # Handle optional parameters
+        nav_timeout = timeout if timeout is not None else 30000  # Increase default timeout to 30s
+        nav_waitUntil = waitUntil if waitUntil else "load"
+        
+        print(f"Navigation parameters: timeout={nav_timeout}, waitUntil={nav_waitUntil}")
+        
+        # Update viewport if specified
+        if width and height:
+            try:
+                await bc._page.set_viewport_size({"width": width, "height": height})
+                print(f"Viewport set to {width}x{height}")
+            except Exception as e:
+                print(f"Viewport error: {e}")
+                return f"Error setting viewport: {e}"
+        
+        # Navigate to the URL
+        try:
+            print(f"Calling browser goto with url={url}")
+            response = await bc._page.goto(url, timeout=nav_timeout, wait_until=nav_waitUntil)
+            print(f"Navigation response: {response}")
+            
+            current_url = await bc._page.url()
+            print(f"Current URL: {current_url}")
+            
+            page_title = await bc._page.title()
+            print(f"Page title: {page_title}")
+            
+            # Get page content using a different method
+            try:
+                # Try getting content directly
+                content = await bc._page.content()
+                
+                # Parse with BeautifulSoup to get visible text
+                soup = BeautifulSoup(content, 'html.parser')
+                text_content = soup.get_text(separator='\n', strip=True)
+                
+                # Preview
+                content_preview = text_content[:100] + "..." if len(text_content) > 100 else text_content
+                print(f"Content preview: {content_preview}")
+                
+                return f"Successfully navigated to: {current_url} - {page_title}\n\nPage content:\n{text_content}"
+            except Exception as e:
+                print(f"Error getting page content: {type(e).__name__}: {e}")
+                return f"Successfully navigated to: {current_url} - {page_title}"
+        except Exception as e:
+            print(f"Navigation error: {type(e).__name__}: {e}")
+            return f"Error navigating to {url}: {e}"
+    
+    @function_tool
+    async def playwright_screenshot(name: str, selector: Optional[str] = None, 
+                             fullPage: Optional[bool] = None,
+                             width: Optional[int] = None, 
+                             height: Optional[int] = None,
+                             savePng: Optional[bool] = None) -> str:
+        """
+        Take a screenshot of the current page or a specific element.
+        
+        Args:
+            name: Name for the screenshot
+            selector: CSS selector for element to screenshot (if None, full page/viewport)
+            fullPage: Store screenshot of the entire page (default: False)
+            width: Width in pixels (used only without selector or fullPage)
+            height: Height in pixels (used only without selector or fullPage)
+            savePng: Save screenshot as PNG file (default: False)
+        
+        Returns:
+            Base64 encoded screenshot and/or path to saved file
+        """
+        bc = browser_computer
+        if not bc._page:
+            return "Error: Browser is not initialized or no page is currently open"
+        
+        try:
+            # Determine screenshot parameters
+            full_page = fullPage if fullPage is not None else False
+            dimensions = {}
+            if width and height and not selector and not full_page:
+                dimensions = {"width": width, "height": height}
+            
+            # Take the screenshot
+            if selector:
+                element = await bc._page.query_selector(selector)
+                if not element:
+                    return f"Error: Element not found with selector '{selector}'"
+                png_bytes = await element.screenshot()
+            else:
+                png_bytes = await bc._page.screenshot(full_page=full_page, **dimensions)
+            
+            # Encode to base64
+            base64_image = base64.b64encode(png_bytes).decode("utf-8")
+            
+            # Optionally save to file
+            file_path = ""
+            if savePng:
+                file_name = f"{name}_{int(asyncio.get_event_loop().time())}.png"
+                file_path = os.path.join(os.getcwd(), file_name)
+                with open(file_path, "wb") as f:
+                    f.write(png_bytes)
+                return f"Screenshot saved to: {file_path}\nBase64: {base64_image[:50]}... (truncated)"
+            
+            return f"Screenshot captured. Base64: {base64_image[:50]}... (truncated)"
+        except Exception as e:
+            return f"Error taking screenshot: {e}"
+    
+    @function_tool
+    async def playwright_click(selector: str) -> str:
+        """
+        Click an element on the page.
+        
+        Args:
+            selector: CSS selector for the element to click
+        
+        Returns:
+            Message indicating success or failure
+        """
+        bc = browser_computer
+        if not bc._page:
+            return "Error: Browser is not initialized or no page is currently open"
+        
+        try:
+            # Wait for selector to be visible
+            await bc._page.wait_for_selector(selector, state="visible", timeout=5000)
+            # Click the element
+            await bc._page.click(selector)
+            return f"Successfully clicked element: {selector}"
+        except Exception as e:
+            return f"Error clicking element '{selector}': {e}"
+    
+    @function_tool
+    async def playwright_iframe_click(iframeSelector: str, selector: str) -> str:
+        """
+        Click an element inside an iframe.
+        
+        Args:
+            iframeSelector: CSS selector for the iframe containing the element
+            selector: CSS selector for the element to click inside the iframe
+        
+        Returns:
+            Message indicating success or failure
+        """
+        bc = browser_computer
+        if not bc._page:
+            return "Error: Browser is not initialized or no page is currently open"
+        
+        try:
+            # Find the iframe
+            iframe = await bc._page.wait_for_selector(iframeSelector, timeout=5000)
+            if not iframe:
+                return f"Error: Iframe not found with selector '{iframeSelector}'"
+            
+            # Get the iframe content
+            frame = await iframe.content_frame()
+            if not frame:
+                return f"Error: Could not access content frame of iframe '{iframeSelector}'"
+            
+            # Click the element inside the iframe
+            await frame.click(selector, timeout=5000)
+            return f"Successfully clicked element '{selector}' inside iframe '{iframeSelector}'"
+        except Exception as e:
+            return f"Error clicking element in iframe: {e}"
+    
+    @function_tool
+    async def playwright_fill(selector: str, value: str) -> str:
+        """
+        Fill out an input field.
+        
+        Args:
+            selector: CSS selector for the input field
+            value: Value to fill in the field
+        
+        Returns:
+            Message indicating success or failure
+        """
+        bc = browser_computer
+        if not bc._page:
+            return "Error: Browser is not initialized or no page is currently open"
+        
+        try:
+            # Wait for selector to be visible
+            await bc._page.wait_for_selector(selector, state="visible", timeout=5000)
+            # Fill the field
+            await bc._page.fill(selector, value)
+            return f"Successfully filled '{value}' into field: {selector}"
+        except Exception as e:
+            return f"Error filling field '{selector}': {e}"
+    
+    @function_tool
+    async def playwright_select(selector: str, value: str) -> str:
+        """
+        Select an option from a dropdown.
+        
+        Args:
+            selector: CSS selector for the select element
+            value: Value to select
+        
+        Returns:
+            Message indicating success or failure
+        """
+        bc = browser_computer
+        if not bc._page:
+            return "Error: Browser is not initialized or no page is currently open"
+        
+        try:
+            # Wait for selector to be visible
+            await bc._page.wait_for_selector(selector, state="visible", timeout=5000)
+            # Select the option
+            await bc._page.select_option(selector, value=value)
+            return f"Successfully selected value '{value}' in dropdown: {selector}"
+        except Exception as e:
+            return f"Error selecting option in dropdown '{selector}': {e}"
+    
+    @function_tool
+    async def playwright_hover(selector: str) -> str:
+        """
+        Hover over an element on the page.
+        
+        Args:
+            selector: CSS selector for the element to hover over
+        
+        Returns:
+            Message indicating success or failure
+        """
+        bc = browser_computer
+        if not bc._page:
+            return "Error: Browser is not initialized or no page is currently open"
+        
+        try:
+            # Wait for selector to be visible
+            await bc._page.wait_for_selector(selector, state="visible", timeout=5000)
+            # Hover over the element
+            await bc._page.hover(selector)
+            return f"Successfully hovered over element: {selector}"
+        except Exception as e:
+            return f"Error hovering over element '{selector}': {e}"
+    
+    @function_tool
+    async def playwright_evaluate(script: str) -> str:
+        """
+        Execute JavaScript in the browser console.
+        
+        Args:
+            script: JavaScript code to execute
+        
+        Returns:
+            Result of the JavaScript execution
+        """
+        bc = browser_computer
+        if not bc._page:
+            return "Error: Browser is not initialized or no page is currently open"
+        
+        try:
+            print(f"Executing script: {script}")
+            
+            # Make sure the script is properly formatted for evaluation
+            if not script.strip().startswith("function") and not "=>" in script:
+                # Wrap non-function scripts with a function
+                eval_script = f"() => {{ {script} }}"
+                print(f"Rewriting script as: {eval_script}")
+            else:
+                eval_script = script
+            
+            # Execute the script
+            try:
+                result = await bc._page.evaluate(eval_script)
+                print(f"Script execution result: {result}")
+                
+                # Format the result for readability
+                if result is None:
+                    return "Script executed successfully (no return value)"
+                
+                if isinstance(result, (dict, list)):
+                    import json
+                    return f"Script result:\n{json.dumps(result, indent=2)}"
+                
+                return f"Script result: {result}"
+            except Exception as e:
+                print(f"Error in page.evaluate: {type(e).__name__}: {e}")
+                # Try a different approach
+                try:
+                    print("Trying alternative execution method...")
+                    await bc._page.add_script_tag(content=f"window.__scriptResult = (function() {{ {script} }})();")
+                    result = await bc._page.evaluate("() => window.__scriptResult")
+                    print(f"Alternative execution result: {result}")
+                    
+                    if result is None:
+                        return "Script executed successfully (no return value)"
+                    
+                    if isinstance(result, (dict, list)):
+                        import json
+                        return f"Script result:\n{json.dumps(result, indent=2)}"
+                    
+                    return f"Script result: {result}"
+                except Exception as e2:
+                    print(f"Error in alternative execution: {type(e2).__name__}: {e2}")
+                    return f"Error executing script: {e} (tried alternate methods)"
+        except Exception as e:
+            print(f"General script execution error: {type(e).__name__}: {e}")
+            return f"Error executing script: {e}"
+
+    @function_tool
+    async def playwright_close() -> str:
+        """
+        Close the browser.
+        
+        Returns:
+            Message indicating success or failure
+        """
+        bc = browser_computer
+        if not bc._browser:
+            return "Browser is already closed or not initialized"
+        
+        try:
+            await bc._browser.close()
+            if bc._playwright:
+                await bc._playwright.stop()
+            return "Browser closed successfully"
+        except Exception as e:
+            return f"Error closing browser: {e}"
+            
+    # HTTP API tools
+    @function_tool
+    async def playwright_get(url: str) -> str:
+        """
+        Perform an HTTP GET request.
+        
+        Args:
+            url: URL to perform GET operation
+        
+        Returns:
+            Response from the server
+        """
+        bc = browser_computer
+        if not bc._page:
+            return "Error: Browser is not initialized or no page is currently open"
+            
+        try:
+            # Use Playwright's API request context
+            context = await bc._browser.new_context()
+            response = await context.request.get(url)
+            
+            # Try to parse as JSON first
+            try:
+                result = await response.json()
+                import json
+                return f"GET {url} - Status: {response.status}\nResponse:\n{json.dumps(result, indent=2)}"
+            except:
+                # Fall back to text
+                result = await response.text()
+                return f"GET {url} - Status: {response.status}\nResponse:\n{result}"
+        except Exception as e:
+            return f"Error executing GET request: {e}"
+            
+    @function_tool
+    async def playwright_post(url: str, value: str) -> str:
+        """
+        Perform an HTTP POST request.
+        
+        Args:
+            url: URL to perform POST operation
+            value: Data to post in the body (JSON string)
+            
+        Returns:
+            Response from the server
+        """
+        bc = browser_computer
+        if not bc._page:
+            return "Error: Browser is not initialized or no page is currently open"
+            
+        try:
+            # Try to parse the value as JSON
+            data = value
+            try:
+                import json
+                data = json.loads(value)
+            except:
+                # If not JSON, use as raw string
+                pass
+                
+            # Use Playwright's API request context
+            context = await bc._browser.new_context()
+            response = await context.request.post(url, data=data)
+            
+            # Try to parse as JSON first
+            try:
+                result = await response.json()
+                return f"POST {url} - Status: {response.status}\nResponse:\n{json.dumps(result, indent=2)}"
+            except:
+                # Fall back to text
+                result = await response.text()
+                return f"POST {url} - Status: {response.status}\nResponse:\n{result}"
+        except Exception as e:
+            return f"Error executing POST request: {e}"
+            
+    @function_tool
+    async def playwright_put(url: str, value: str) -> str:
+        """
+        Perform an HTTP PUT request.
+        
+        Args:
+            url: URL to perform PUT operation
+            value: Data to put in the body (JSON string)
+            
+        Returns:
+            Response from the server
+        """
+        bc = browser_computer
+        if not bc._page:
+            return "Error: Browser is not initialized or no page is currently open"
+            
+        try:
+            # Try to parse the value as JSON
+            data = value
+            try:
+                import json
+                data = json.loads(value)
+            except:
+                # If not JSON, use as raw string
+                pass
+                
+            # Use Playwright's API request context
+            context = await bc._browser.new_context()
+            response = await context.request.put(url, data=data)
+            
+            # Try to parse as JSON first
+            try:
+                result = await response.json()
+                return f"PUT {url} - Status: {response.status}\nResponse:\n{json.dumps(result, indent=2)}"
+            except:
+                # Fall back to text
+                result = await response.text()
+                return f"PUT {url} - Status: {response.status}\nResponse:\n{result}"
+        except Exception as e:
+            return f"Error executing PUT request: {e}"
+            
+    @function_tool
+    async def playwright_patch(url: str, value: str) -> str:
+        """
+        Perform an HTTP PATCH request.
+        
+        Args:
+            url: URL to perform PATCH operation
+            value: Data to patch in the body (JSON string)
+            
+        Returns:
+            Response from the server
+        """
+        bc = browser_computer
+        if not bc._page:
+            return "Error: Browser is not initialized or no page is currently open"
+            
+        try:
+            # Try to parse the value as JSON
+            data = value
+            try:
+                import json
+                data = json.loads(value)
+            except:
+                # If not JSON, use as raw string
+                pass
+                
+            # Use Playwright's API request context
+            context = await bc._browser.new_context()
+            response = await context.request.patch(url, data=data)
+            
+            # Try to parse as JSON first
+            try:
+                result = await response.json()
+                return f"PATCH {url} - Status: {response.status}\nResponse:\n{json.dumps(result, indent=2)}"
+            except:
+                # Fall back to text
+                result = await response.text()
+                return f"PATCH {url} - Status: {response.status}\nResponse:\n{result}"
+        except Exception as e:
+            return f"Error executing PATCH request: {e}"
+            
+    @function_tool
+    async def playwright_delete(url: str) -> str:
+        """
+        Perform an HTTP DELETE request.
+        
+        Args:
+            url: URL to perform DELETE operation
+            
+        Returns:
+            Response from the server
+        """
+        bc = browser_computer
+        if not bc._page:
+            return "Error: Browser is not initialized or no page is currently open"
+            
+        try:
+            # Use Playwright's API request context
+            context = await bc._browser.new_context()
+            response = await context.request.delete(url)
+            
+            # Try to parse as JSON first
+            try:
+                result = await response.json()
+                import json
+                return f"DELETE {url} - Status: {response.status}\nResponse:\n{json.dumps(result, indent=2)}"
+            except:
+                # Fall back to text
+                result = await response.text()
+                return f"DELETE {url} - Status: {response.status}\nResponse:\n{result}"
+        except Exception as e:
+            return f"Error executing DELETE request: {e}"
+    
+    # Legacy tool for backward compatibility
     @function_tool
     async def navigate(url: str, return_content: Optional[bool] = None, format: Optional[str] = None) -> str:
         """
         Navigate the browser to a specific URL and optionally return page content.
+        DEPRECATED: Use playwright_navigate instead for more direct control.
         
         Args:
             url: The URL to navigate to (should start with http:// or https://)
@@ -241,11 +782,11 @@ def create_navigate_tool(browser_computer):
         if not url.startswith(("http://", "https://")):
             url = "https://" + url
         
-        # Navigate to the URL
-        await browser_computer.goto(url)
+        # Navigate to the URL using the playwright_navigate tool
+        nav_result = await playwright_navigate(url)
         
         # Base success message
-        message = f"Successfully navigated to {url}. I can now interact with elements on this page using the ComputerTool."
+        message = f"Successfully navigated to {url}. Consider using playwright_* tools for direct control."
         
         # Set defaults if None
         if return_content is None:
@@ -255,72 +796,115 @@ def create_navigate_tool(browser_computer):
             
         # Optionally get and return the page content
         if return_content:
-            content_message = await get_page_content(format)
-            return message + "\n\n" + content_message
+            bc = browser_computer
+            if not bc._page:
+                return "Error: Browser is not initialized or no page is currently open."
+            
+            try:
+                # Get the current URL for reference
+                current_url = await bc._page.url()
+                
+                if format.lower() == "html":
+                    content = await bc._page.content()
+                    return f"Page HTML content from {current_url}:\n{content}"
+                elif format.lower() == "markdown":
+                    # Get the HTML content for conversion to markdown
+                    html_content = await bc._page.content()
+                    
+                    # Get the title
+                    title = await bc._page.title()
+                    title_md = f"# {title}\n\n" if title else ""
+                    
+                    # Define a synchronous function for the conversion
+                    def convert_html_to_markdown(html):
+                        # Use BeautifulSoup to find the main content
+                        soup = BeautifulSoup(html, 'html.parser')
+                        
+                        # Try to get the main content area
+                        main_content = soup.find('article') or soup.find('main') or soup.find('body')
+                        
+                        # Convert to markdown with improved settings
+                        md_content = markdownify(str(main_content), heading_style="ATX")
+                        
+                        # Clean up the markdown output
+                        md_content = re.sub(r'\n{3,}', '\n\n', md_content)  # Remove excessive newlines
+                        
+                        return md_content
+                    
+                    # Run the conversion in a separate thread to avoid blocking
+                    md_content = await asyncio.to_thread(convert_html_to_markdown, html_content)
+                    content = title_md + md_content
+                    
+                    return f"Page content (Markdown) from {current_url}:\n{content}"
+                else:  # Default to text
+                    content = await bc._page.evaluate('() => document.body.innerText')
+                    return f"Page text content from {current_url}:\n{content}"
+            except Exception as e:
+                return f"Error retrieving page content: {e}"
         
         return message
     
     @function_tool
-    async def get_page_content(format: Optional[str] = None) -> str:
+    async def playwright_get_text(selector: Optional[str] = None) -> str:
         """
-        Get content from the current page without navigating to a new URL.
+        Get text content from the current page or a specific element.
         
         Args:
-            format: The format to return content in - "text", "html", or "markdown"
-        
-        Returns:
-            The page content in the requested format
-        """
-        # Use the outer browser_computer
-        bc = browser_computer
-        
-        # Set default format if None
-        if format is None:
-            format = "text"
+            selector: Optional CSS selector for a specific element
             
+        Returns:
+            The text content from the current page or element
+        """
+        bc = browser_computer
         if not bc._page:
-            return "Error: Browser is not initialized or no page is currently open."
+            return "Error: Browser is not initialized or no page is currently open"
         
         try:
-            # Get the current URL for reference
-            current_url = await bc._page.url()
+            print(f"Getting text content. Selector: {selector if selector else 'entire page'}")
             
-            if format.lower() == "html":
-                content = await bc._page.content()
-                return f"Page HTML content from {current_url}:\n{content}"
-            elif format.lower() == "markdown":
-                # Get the HTML content for conversion to markdown
-                html_content = await bc._page.content()
+            # Get page content using content() method
+            html = await bc._page.content()
+            
+            # Parse with BeautifulSoup
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # If selector is provided, get text from that element
+            if selector:
+                # Find element in the soup
+                element = soup.select_one(selector)
+                if not element:
+                    return f"Error: Element not found with selector '{selector}'"
                 
-                # Get the title
-                title = await bc._page.title()
-                title_md = f"# {title}\n\n" if title else ""
-                
-                # Define a synchronous function for the conversion
-                def convert_html_to_markdown(html):
-                    # Use BeautifulSoup to find the main content
-                    soup = BeautifulSoup(html, 'html.parser')
-                    
-                    # Try to get the main content area
-                    main_content = soup.find('article') or soup.find('main') or soup.find('body')
-                    
-                    # Convert to markdown with improved settings
-                    md_content = markdownify(str(main_content), heading_style="ATX")
-                    
-                    # Clean up the markdown output
-                    md_content = re.sub(r'\n{3,}', '\n\n', md_content)  # Remove excessive newlines
-                    
-                    return md_content
-                
-                # Run the conversion in a separate thread to avoid blocking
-                md_content = await asyncio.to_thread(convert_html_to_markdown, html_content)
-                content = title_md + md_content
-                
-                return f"Page content (Markdown) from {current_url}:\n{content}"
-            else:  # Default to text
-                content = await bc._page.evaluate('() => document.body.innerText')
-                return f"Page text content from {current_url}:\n{content}"
+                # Get text from the element
+                text_content = element.get_text(separator='\n', strip=True)
+            else:
+                # Get text from whole page
+                text_content = soup.get_text(separator='\n', strip=True)
+            
+            # Get page title
+            title = soup.title.string if soup.title else "No title"
+            
+            return f"Page: {title}\n\nContent:\n{text_content}"
         except Exception as e:
-            return f"Error retrieving page content: {e}"
+            print(f"Error getting text content: {type(e).__name__}: {e}")
+            return f"Error getting text content: {e}"
     
-    return navigate, get_page_content
+    # Return all tools as a dictionary
+    return {
+        "playwright_navigate": playwright_navigate,
+        "playwright_screenshot": playwright_screenshot,
+        "playwright_click": playwright_click,
+        "playwright_iframe_click": playwright_iframe_click,
+        "playwright_fill": playwright_fill,
+        "playwright_select": playwright_select,
+        "playwright_hover": playwright_hover,
+        "playwright_evaluate": playwright_evaluate,
+        "playwright_get_text": playwright_get_text,
+        "playwright_close": playwright_close,
+        "playwright_get": playwright_get,
+        "playwright_post": playwright_post,
+        "playwright_put": playwright_put,
+        "playwright_patch": playwright_patch,
+        "playwright_delete": playwright_delete,
+        "navigate": navigate
+    }

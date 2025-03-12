@@ -267,9 +267,13 @@ async def main():
 
 1. For web browsing and website interaction tasks:
    - ALWAYS delegate to browser_agent
-   - The browser_agent now has dedicated tools:
-     * NavigateTool: specifically for changing pages
-     * ComputerTool: for interactions like clicking, typing, etc.
+   - The browser_agent now has enhanced direct Playwright tools:
+     * playwright_navigate: For navigating to pages with configurable options
+     * playwright_click: For clicking elements using CSS selectors
+     * playwright_fill: For filling form inputs
+     * playwright_screenshot: For taking screenshots
+     * playwright_get/post/put/etc.: For direct HTTP API requests
+     * Plus many more specialized tools for direct browser control
    - This includes ANY requests containing phrases like:
      * "go to website X"
      * "visit Y website"
@@ -279,6 +283,8 @@ async def main():
      * "open Z in browser"
      * "interact with X"
      * "click on Y"
+     * "fill out form"
+     * "API request"
      * "reddit" or any specific website name
 
 2. For information lookup and web searches:
@@ -289,7 +295,8 @@ async def main():
      * "look up Z"
      * "research topic X"
 
-Whenever a user mentions a specific website or browsing action, ALWAYS use browser_agent."""
+Whenever a user mentions a specific website, web interaction, or browsing action, ALWAYS use browser_agent.
+The browser_agent should always prefer direct Playwright tools over ComputerTool for faster, more reliable interactions."""
     })
     
     # Handle test prompt if specified (before the main loop)
