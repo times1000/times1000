@@ -4,19 +4,39 @@ This repository contains a Supervisor Agent that orchestrates specialized agents
 
 ## Prerequisites
 
-1. Install required Python packages:
+1. Set up a Python virtual environment:
+   ```bash
+   # Create a virtual environment
+   python -m venv venv
+   
+   # Activate the virtual environment
+   # On macOS/Linux:
+   source venv/bin/activate
+   # On Windows:
+   # venv\Scripts\activate
+   
+   # Your terminal prompt should now show (venv) indicating the virtual environment is active
    ```
+
+2. Install required Python packages:
+   ```bash
+   # Make sure your virtual environment is activated
    pip install -r requirements.txt
    ```
 
-2. Install Claude Code CLI:
-   ```
+3. Install Claude Code CLI:
+   ```bash
    # Follow installation instructions at https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview
    ```
 
-3. Set your OpenAI API key:
-   ```
+4. Set your OpenAI API key:
+   ```bash
    export OPENAI_API_KEY="your-api-key-here"
+   ```
+
+5. Deactivating the virtual environment when finished:
+   ```bash
+   deactivate
    ```
 
 ## Supervisor Agent

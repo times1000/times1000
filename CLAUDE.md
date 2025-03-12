@@ -13,5 +13,8 @@
 - No approval needed for commits
 
 ## Environment Setup
+- Create virtual environment: `python -m venv venv`
+- Activate virtual environment: `source venv/bin/activate` (macOS/Linux) or `venv\Scripts\activate` (Windows)
 - Install dependencies: `pip install -r requirements.txt`
 - Start the application: `python supervisor.py`
+- Deactivate when done: `deactivate`
