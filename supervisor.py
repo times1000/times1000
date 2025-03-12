@@ -215,13 +215,26 @@ async def create_browser_agent():
             browser_initialized = True
         return await browser_manager.get_computer()
     
-    # Create a wrapper function for the computer tool
-    async def wrapped_computer_tool(input_data):
-        async with await get_lazy_computer() as computer:
-            # Create the ComputerTool with the actual computer instance
-            computer_tool = ComputerTool(computer)
-            # Forward the call to the real computer tool
-            return await computer_tool(input_data)
+    # Get a computer instance to create the tool properly
+    async with await browser_manager.get_computer() as computer:
+        # Create the ComputerTool with proper metadata
+        computer_tool = ComputerTool(computer)
+        
+        # Create a wrapper function that preserves metadata but initializes lazily when called
+        class LazyComputerTool:
+            def __init__(self, base_tool):
+                self.base_tool = base_tool
+                # Copy attributes from the original tool
+                self.name = base_tool.name
+                self.description = base_tool.description
+                
+            async def __call__(self, input_data):
+                # Lazy initialization when actually called
+                async with await get_lazy_computer() as computer:
+                    # Create a fresh tool with the new computer
+                    actual_tool = ComputerTool(computer)
+                    # Forward the call
+                    return await actual_tool(input_data)
     
     # Create the agent with the wrapped computer tool
     return Agent(
@@ -271,7 +284,7 @@ SELF-SUFFICIENCY:
 5. For Reddit specifically, look for posts with high upvotes, awards, or many comments
             """,
             handoff_description="A specialized agent for direct website interaction via browser",
-            tools=[wrapped_computer_tool],
+            tools=[LazyComputerTool(computer_tool)],
             # Use computer-use-preview model when using ComputerTool
             model="computer-use-preview",
             model_settings=ModelSettings(truncation="auto"),
