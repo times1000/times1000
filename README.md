@@ -1,109 +1,50 @@
-# Supervisor Agent
+# times1000
 
-This repository contains a Supervisor Agent that orchestrates specialized agents for development tasks using the OpenAI Agents SDK and Claude Code CLI.
+times1000 is a project focused on amplifying human creativity through autonomous AI agents. By creating a system of specialized agents capable of performing extremely complex tasks with minimal human input, we aim to multiply human creative potential and productivity. These agents work collaboratively to handle technical challenges, research information, and interact with web applications, freeing humans to focus on higher-level creative thinking and innovation.
 
-## Prerequisites
+Remarkably, all code in this repository was written entirely by AI models (Claude and OpenAI) - no humans have directly edited this codebase. This serves as a powerful demonstration of autonomous AI capabilities and the potential for AI-human collaboration.
 
-1. Set up a Python virtual environment:
-   ```bash
-   # Create a virtual environment
-   python -m venv venv
-   
-   # Activate the virtual environment
-   # On macOS/Linux:
-   source venv/bin/activate
-   # On Windows:
-   # venv\Scripts\activate
-   
-   # Your terminal prompt should now show (venv) indicating the virtual environment is active
-   ```
-
-2. Install required Python packages:
-   ```bash
-   # Make sure your virtual environment is activated
-   pip install -r requirements.txt
-   
-   # Install Playwright browsers
-   python -m playwright install
-   ```
-
-3. Install Claude Code CLI:
-   ```bash
-   # Follow installation instructions at https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview
-   ```
-
-4. Set your OpenAI API key:
-   ```bash
-   export OPENAI_API_KEY="your-api-key-here"
-   ```
-
-5. Deactivating the virtual environment when finished:
-   ```bash
-   deactivate
-   ```
-
-## Supervisor Agent
-
-The Supervisor Agent delegates tasks to specialized agents based on their expertise. It follows a structured workflow of planning, execution, and verification.
-
-### Running the Agent
+## Setup
 
 ```bash
-# Basic usage
+# Create and activate virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Install Playwright browsers
+python -m playwright install
+```
+
+## Usage
+
+```bash
+# Run the application
 python supervisor.py
 
-# Run with a test to verify browser functionality
+# Run with test to verify browser functionality
 python supervisor.py -t
 
-# Run with an initial prompt
+# Run with initial prompt
 python supervisor.py -p "your prompt here"
 ```
 
-This will start an interactive session where you can enter requests and get responses. Command history is available using the up/down arrow keys. Press Ctrl+C to exit.
+## Core Agents
 
-The browser is lazy-loaded, meaning it only initializes when browser functionality is actually requested, improving startup performance.
+- **Supervisor**: Orchestrates tasks and delegates to specialized agents
+- **Browser**: Handles web navigation and interaction through Playwright
+- **Code**: Provides code generation and analysis capabilities
+- **Filesystem**: Manages file operations and project organization
+- **Search**: Performs web searches to gather information
 
-## Architecture
+## Future Vision
 
-The system uses an "agents-as-tools" pattern with four specialized agents:
+Our roadmap for times1000 includes:
 
-1. **CodeAgent**: Handles code writing, debugging, and explanation tasks
-   - Uses Claude CLI for code generation and analysis
-
-2. **FilesystemAgent**: Manages file operations and project organization
-   - Executes shell commands for file manipulation
-
-3. **SearchAgent**: Performs web searches for information gathering
-   - Uses WebSearchTool for online research
-
-4. **BrowserAgent**: Directly interacts with websites via browser automation
-   - Uses NavigateTool for page navigation with content extraction
-   - Provides get_page_content tool for retrieving content from current page
-   - Uses ComputerTool for advanced interactions (clicking, typing, etc.)
-
-The Supervisor coordinates these agents by:
-- Creating detailed step-by-step plans
-- Delegating tasks to appropriate specialized agents
-- Verifying the success of each step
-- Iterating until all success criteria are met
-
-## Features
-
-- Command history with up/down arrow navigation
-- Streaming responses with markdown rendering
-- Structured planning and verification workflow
-- Self-sufficiency with minimal user intervention
-- Specialized agents for different domains
-- Lazy-loaded browser automation with Playwright
-- Advanced web content extraction in multiple formats (text, HTML, markdown)
-- Browser page content retrieval without renavigation
-
-## How to Extend
-
-You can extend the system by:
-
-1. Adding new specialized agents for different domains
-2. Implementing additional tools for existing agents
-3. Enhancing the supervisor's planning and verification capabilities
-
-For more information, see the [OpenAI Agents SDK documentation](https://openai.github.io/openai-agents-python/) and [Claude Code documentation](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview)
+- Running multiple agents in parallel, with the supervisor managing them as needed
+- Minimal human interaction - the supervisor only engages humans as a last resort
+- Each agent operating in its own Docker container, allowing complete control over its environment
+- Self-improving capabilities - agents will be able to edit their own code through GitHub PRs back to the original repository
+- Fully autonomous operation with agents collaborating to solve increasingly complex problems
