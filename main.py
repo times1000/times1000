@@ -21,6 +21,15 @@ import atexit
 import contextlib
 import argparse
 from typing import List
+import textwrap
+
+# Try to load .env file if available
+try:
+    from dotenv import load_dotenv
+    load_dotenv()  # Load environment variables from .env file if it exists
+except ImportError:
+    # dotenv is not required, but it's a helpful convenience
+    pass
 
 # Platform-specific readline setup
 try:
@@ -51,6 +60,32 @@ from utils.browser_computer import LocalPlaywrightComputer
 
 # Import the supervisor agent creator from our core_agents package
 from core_agents.supervisor import create_supervisor_agent
+
+# Check for required environment variables
+def check_api_keys():
+    """Check if required API keys are set and provide helpful error messages if not."""
+    if not os.environ.get("OPENAI_API_KEY"):
+        error_message = textwrap.dedent("""
+        ERROR: OpenAI API key is missing!
+        
+        You need to set the OPENAI_API_KEY environment variable to use this application.
+        
+        You can do this in one of the following ways:
+        
+        1. Set it for the current session (replace YOUR_API_KEY with your actual key):
+           export OPENAI_API_KEY=YOUR_API_KEY  # Linux/macOS
+           set OPENAI_API_KEY=YOUR_API_KEY     # Windows
+        
+        2. Add it to your shell profile (~/.bashrc, ~/.zshrc, etc.)
+        
+        3. Create a .env file in the project directory with:
+           OPENAI_API_KEY=YOUR_API_KEY
+        
+        You can get an API key from: https://platform.openai.com/api-keys
+        """)
+        print(error_message)
+        return False
+    return True
 
 # Process streamed response function
 async def process_streamed_response(agent, input_items):
@@ -216,7 +251,14 @@ async def main():
     parser.add_argument("-t", "--test", 
                         help="Run a test prompt to verify browser agent functionality", 
                         action="store_true")
+    parser.add_argument("--skip-key-check",
+                        help="Skip the API key check (for testing only)",
+                        action="store_true")
     args = parser.parse_args()
+    
+    # Check for required API keys unless specifically skipped
+    if not args.skip_key_check and not check_api_keys():
+        sys.exit(1)
     
     # Setup readline for command history
     readline_available = setup_readline()
@@ -354,7 +396,15 @@ Whenever a user mentions a specific website or browsing action, ALWAYS use brows
 
 # Test function to verify our print statement changes
 def test_startup_messages():
-    """Test the reduced startup messages"""
+    """Test the reduced startup messages and API key check"""
+    # Test API key check
+    if not os.environ.get("OPENAI_API_KEY"):
+        print("\nTesting API key check message:")
+        check_api_keys()
+        print("\nAPI key check message displayed correctly.")
+    else:
+        print("\nOpenAI API key is set, skipping API key check test.")
+    
     # Simulate the welcome message
     print("\nSupervisor Agent ready. Type your request or 'exit' to quit.")
     print("Up/down arrow keys available for command history.")
