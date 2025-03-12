@@ -13,4 +13,5 @@
 - No approval needed for commits
 
 ## Environment Setup
+- Install dependencies: `pip install -r requirements.txt`
 - Start the application: `python supervisor.py`

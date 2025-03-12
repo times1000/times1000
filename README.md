@@ -4,9 +4,9 @@ This repository contains a Supervisor Agent that orchestrates specialized agents
 
 ## Prerequisites
 
-1. Install the OpenAI Agents SDK:
+1. Install required Python packages:
    ```
-   pip install openai-agents
+   pip install -r requirements.txt
    ```
 
 2. Install Claude Code CLI:
@@ -17,11 +17,6 @@ This repository contains a Supervisor Agent that orchestrates specialized agents
 3. Set your OpenAI API key:
    ```
    export OPENAI_API_KEY="your-api-key-here"
-   ```
-
-4. Install the Rich library for markdown rendering:
-   ```
-   pip install rich
    ```
 
 ## Supervisor Agent
