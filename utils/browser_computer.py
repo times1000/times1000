@@ -290,7 +290,11 @@ def create_browser_tools(browser_computer):
             
             # Get current URL - this should be safe even if navigation had issues
             try:
-                current_url = await bc._page.url()
+                # Newer Playwright versions use url as a property, not a method
+                current_url = bc._page.url
+                if callable(current_url):
+                    # For backward compatibility with older Playwright versions
+                    current_url = await current_url()
                 print(f"Current URL: {current_url}")
             except Exception as url_err:
                 print(f"Error getting current URL: {type(url_err).__name__}: {url_err}")
@@ -298,7 +302,11 @@ def create_browser_tools(browser_computer):
             
             # Get page title - this should be safe even if navigation had issues
             try:
-                page_title = await bc._page.title()
+                # Newer Playwright versions use title as a property, not a method
+                page_title = bc._page.title
+                if callable(page_title):
+                    # For backward compatibility with older Playwright versions
+                    page_title = await page_title()
                 print(f"Page title: {page_title}")
             except Exception as title_err:
                 print(f"Error getting page title: {type(title_err).__name__}: {title_err}")
@@ -590,10 +598,25 @@ def create_browser_tools(browser_computer):
                 await bc._page.add_script_tag(content=wrapped_script)
                 
                 # Retrieve the result from the global variable
-                js_result = await bc._page.evaluate(f"() => window.{result_var}")
+                # Handle both property and method versions of evaluate
+                evaluate_method = bc._page.evaluate
+                if callable(evaluate_method):
+                    js_result = await evaluate_method(f"() => window.{result_var}")
+                else:
+                    # For newer Playwright versions, handle as property
+                    js_result = await bc._page.evaluate(f"() => window.{result_var}")
                 
                 # Clean up the global variable
-                await bc._page.evaluate(f"() => {{ delete window.{result_var}; }}")
+                try:
+                    # Handle both property and method versions of evaluate
+                    if callable(evaluate_method):
+                        await evaluate_method(f"() => {{ delete window.{result_var}; }}")
+                    else:
+                        # For newer Playwright versions, handle as property
+                        await bc._page.evaluate(f"() => {{ delete window.{result_var}; }}")
+                except Exception as cleanup_err:
+                    print(f"Error cleaning up script variable: {cleanup_err}")
+                    # Non-critical error, continue execution
                 
                 # Check if we got an error
                 if isinstance(js_result, dict) and 'error' in js_result:
@@ -615,14 +638,29 @@ def create_browser_tools(browser_computer):
                 try:
                     # For simple statements, try direct evaluation
                     if "return" not in script and ";" not in script and len(script.strip().split("\n")) == 1:
-                        simple_result = await bc._page.evaluate(f"() => {{{script}}}")
+                        # Handle both property and method versions of evaluate
+                        evaluate_method = bc._page.evaluate
+                        if callable(evaluate_method):
+                            simple_result = await evaluate_method(f"() => {{{script}}}")
+                        else:
+                            # For newer Playwright versions
+                            simple_result = await bc._page.evaluate(f"() => {{{script}}}")
+                            
                         return f"Script result: {simple_result}"
                 except Exception as e2:
                     print(f"Simple evaluation error: {type(e2).__name__}: {e2}")
                 
                 # Final fallback - try executing without returning a result
                 try:
-                    await bc._page.evaluate(f"() => {{ {script} }}")
+                    # Create another script tag as the most basic approach
+                    final_script = f"""
+                    try {{
+                        {script}
+                    }} catch (e) {{
+                        console.error("Script execution error:", e);
+                    }}
+                    """
+                    await bc._page.add_script_tag(content=final_script)
                     return "Script executed successfully (result unavailable)"
                 except Exception as e3:
                     print(f"Fallback execution error: {type(e3).__name__}: {e3}")
@@ -674,16 +712,33 @@ def create_browser_tools(browser_computer):
             
             try:
                 response = await context.request.get(url)
+                # Handle both property and method versions of status
                 status = response.status
+                if callable(status):
+                    status = await status()
                 
                 # Try to parse as JSON first
                 try:
-                    result = await response.json()
+                    # Handle both property and method versions of json
+                    json_method = response.json
+                    if callable(json_method):
+                        result = await json_method()
+                    else:
+                        # If it's a property, assume it's already the result
+                        result = json_method
+                        
                     import json
                     return f"GET {url} - Status: {status}\nResponse:\n{json.dumps(result, indent=2)}"
                 except:
                     # Fall back to text
-                    result = await response.text()
+                    # Handle both property and method versions of text
+                    text_method = response.text
+                    if callable(text_method):
+                        result = await text_method()
+                    else:
+                        # If it's a property, assume it's already the result
+                        result = text_method
+                        
                     return f"GET {url} - Status: {status}\nResponse:\n{result}"
             finally:
                 # Make sure to close the context
@@ -722,15 +777,33 @@ def create_browser_tools(browser_computer):
             
             try:
                 response = await context.request.post(url, data=data)
+                # Handle both property and method versions of status
                 status = response.status
+                if callable(status):
+                    status = await status()
                 
                 # Try to parse as JSON first
                 try:
-                    result = await response.json()
+                    # Handle both property and method versions of json
+                    json_method = response.json
+                    if callable(json_method):
+                        result = await json_method()
+                    else:
+                        # If it's a property, assume it's already the result
+                        result = json_method
+                        
+                    import json
                     return f"POST {url} - Status: {status}\nResponse:\n{json.dumps(result, indent=2)}"
                 except:
                     # Fall back to text
-                    result = await response.text()
+                    # Handle both property and method versions of text
+                    text_method = response.text
+                    if callable(text_method):
+                        result = await text_method()
+                    else:
+                        # If it's a property, assume it's already the result
+                        result = text_method
+                        
                     return f"POST {url} - Status: {status}\nResponse:\n{result}"
             finally:
                 # Make sure to close the context
@@ -769,15 +842,33 @@ def create_browser_tools(browser_computer):
             
             try:
                 response = await context.request.put(url, data=data)
+                # Handle both property and method versions of status
                 status = response.status
+                if callable(status):
+                    status = await status()
                 
                 # Try to parse as JSON first
                 try:
-                    result = await response.json()
+                    # Handle both property and method versions of json
+                    json_method = response.json
+                    if callable(json_method):
+                        result = await json_method()
+                    else:
+                        # If it's a property, assume it's already the result
+                        result = json_method
+                        
+                    import json
                     return f"PUT {url} - Status: {status}\nResponse:\n{json.dumps(result, indent=2)}"
                 except:
                     # Fall back to text
-                    result = await response.text()
+                    # Handle both property and method versions of text
+                    text_method = response.text
+                    if callable(text_method):
+                        result = await text_method()
+                    else:
+                        # If it's a property, assume it's already the result
+                        result = text_method
+                        
                     return f"PUT {url} - Status: {status}\nResponse:\n{result}"
             finally:
                 # Make sure to close the context
@@ -816,15 +907,33 @@ def create_browser_tools(browser_computer):
             
             try:
                 response = await context.request.patch(url, data=data)
+                # Handle both property and method versions of status
                 status = response.status
+                if callable(status):
+                    status = await status()
                 
                 # Try to parse as JSON first
                 try:
-                    result = await response.json()
+                    # Handle both property and method versions of json
+                    json_method = response.json
+                    if callable(json_method):
+                        result = await json_method()
+                    else:
+                        # If it's a property, assume it's already the result
+                        result = json_method
+                        
+                    import json
                     return f"PATCH {url} - Status: {status}\nResponse:\n{json.dumps(result, indent=2)}"
                 except:
                     # Fall back to text
-                    result = await response.text()
+                    # Handle both property and method versions of text
+                    text_method = response.text
+                    if callable(text_method):
+                        result = await text_method()
+                    else:
+                        # If it's a property, assume it's already the result
+                        result = text_method
+                        
                     return f"PATCH {url} - Status: {status}\nResponse:\n{result}"
             finally:
                 # Make sure to close the context
@@ -853,16 +962,33 @@ def create_browser_tools(browser_computer):
             
             try:
                 response = await context.request.delete(url)
+                # Handle both property and method versions of status
                 status = response.status
+                if callable(status):
+                    status = await status()
                 
                 # Try to parse as JSON first
                 try:
-                    result = await response.json()
+                    # Handle both property and method versions of json
+                    json_method = response.json
+                    if callable(json_method):
+                        result = await json_method()
+                    else:
+                        # If it's a property, assume it's already the result
+                        result = json_method
+                        
                     import json
                     return f"DELETE {url} - Status: {status}\nResponse:\n{json.dumps(result, indent=2)}"
                 except:
                     # Fall back to text
-                    result = await response.text()
+                    # Handle both property and method versions of text
+                    text_method = response.text
+                    if callable(text_method):
+                        result = await text_method()
+                    else:
+                        # If it's a property, assume it's already the result
+                        result = text_method
+                        
                     return f"DELETE {url} - Status: {status}\nResponse:\n{result}"
             finally:
                 # Make sure to close the context
