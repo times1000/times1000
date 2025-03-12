@@ -1,29 +1,16 @@
-# CLAUDE.md - AI Assistant Guide
+# OpenAI Agents Project Guidelines
 
-## Build/Test Commands
-- Start services: `docker-compose up`
-- Stop services: `docker-compose down`
-- Rebuild and restart after changes: `docker-compose down && docker-compose up`
-- Lint: `npm run lint`
-- Typecheck: `npm run typecheck`
-- Test all: `npm test`
-- Test single: `npm test -- -t "test name"`
+## Instructions
+- Use `playwright` to access websites
+- Use `github` to manage github access
+- Use `docker-compose` to manage services
 
-## Code Style Guidelines
-- Use TypeScript for type safety
-- Format with Prettier, enforce with ESLint
-- Use named exports over default exports
-- Follow kebab-case for filenames, PascalCase for components
-- Prefer functional components with React hooks
-- Import order: React → external libs → internal modules → types/styles
-- Error handling: Use try/catch with descriptive error messages
-- Comments: Document "why" not "what" (code should be self-explanatory)
-- Keep functions small and focused on a single responsibility
+## Git Workflow
+- Always commit changes after completing any task
+- Push changes to GitHub after any major change
+- Always pull from GitHub before starting new work
+- Keep commit messages short and concise
+- No approval needed for commits
 
-## Workflow Instructions
-- Always run type check (`npm run typecheck`) after making code changes
-- Fix ALL TypeScript errors after making changes, whether directly related to your changes or not
-- Restart Docker containers after changes and verify functionality (`docker-compose down && docker-compose up`)
-- Automatically commit changes to git after completing tasks
-- Keep commit messages short and concise - no approval needed
-- Push changes to the repository after committing
+## Environment Setup
+- Start the application: `python supervisor.py`

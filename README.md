@@ -1,172 +1,74 @@
-# *1000
+# Supervisor Agent
 
-AI agent framework with human-in-the-loop planning and execution.
+This repository contains a Supervisor Agent that orchestrates specialized agents for development tasks using the OpenAI Agents SDK and Claude Code CLI.
+
+## Prerequisites
+
+1. Install the OpenAI Agents SDK:
+   ```
+   pip install openai-agents
+   ```
+
+2. Install Claude Code CLI:
+   ```
+   # Follow installation instructions at https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview
+   ```
+
+3. Set your OpenAI API key:
+   ```
+   export OPENAI_API_KEY="your-api-key-here"
+   ```
+
+4. Install the Rich library for markdown rendering:
+   ```
+   pip install rich
+   ```
+
+## Supervisor Agent
+
+The Supervisor Agent delegates tasks to specialized agents based on their expertise. It follows a structured workflow of planning, execution, and verification.
+
+### Running the Agent
+
+```bash
+python supervisor.py
+```
+
+This will start an interactive session where you can enter requests and get responses. Command history is available using the up/down arrow keys. Press Ctrl+C to exit.
+
+## Architecture
+
+The system uses an "agents-as-tools" pattern with three specialized agents:
+
+1. **CodeAgent**: Handles code writing, debugging, and explanation tasks
+   - Uses Claude CLI for code generation and analysis
+
+2. **FilesystemAgent**: Manages file operations and project organization
+   - Executes shell commands for file manipulation
+
+3. **WebAgent**: Performs web searches for information gathering
+   - Uses WebSearchTool for online research
+
+The Supervisor coordinates these agents by:
+- Creating detailed step-by-step plans
+- Delegating tasks to appropriate specialized agents
+- Verifying the success of each step
+- Iterating until all success criteria are met
 
 ## Features
 
-- Web interface for agent management
-- AI-generated plans with human approval workflow
-- Interactive execution monitoring
-- Follow-up suggestions for continued assistance
-- Unified agent architecture with automatic name/description generation
-- Real-time updates via WebSockets
-- OpenAI integration for intelligent planning and execution
+- Command history with up/down arrow navigation
+- Streaming responses with markdown rendering
+- Structured planning and verification workflow
+- Self-sufficiency with minimal user intervention
+- Specialized agents for different domains
 
-## Quick Start
+## How to Extend
 
-### Prerequisites
+You can extend the system by:
 
-- Node.js 16+
-- npm or yarn
-- OpenAI API key
+1. Adding new specialized agents for different domains
+2. Implementing additional tools for existing agents
+3. Enhancing the supervisor's planning and verification capabilities
 
-### Setup
-
-1. Clone and install
-```
-git clone https://github.com/yourusername/*1000.git
-cd *1000
-npm install
-```
-
-2. Set up environment
-```
-cp .env.example .env
-# Add your OPENAI_API_KEY to .env
-```
-
-### Run
-
-With Docker (recommended):
-```
-docker-compose up
-# Access at http://localhost:5173
-```
-
-This setup includes:
-- Hot module reloading - changes to files will update instantly
-- API server running on port 3000 (proxied through Vite)
-- MySQL database for agent and plan storage
-
-For local development without Docker:
-```
-npm run dev
-# Access at http://localhost:5173
-```
-
-## How to Use
-
-1. Create an agent by sending a command
-2. The system will generate a name, description, and initial plan
-3. Review and approve the execution plan
-4. Monitor progress and review results
-5. Explore follow-up suggestions for continued assistance
-6. Each new command may update the agent's name and description to reflect its evolving purpose
-
-## AI Integration
-
-This framework integrates with leading AI models for intelligent capabilities:
-
-### OpenAI Integration
-- Generate detailed, context-aware execution plans with GPT-4o
-- Execute plan steps with intelligent reasoning
-- Provide thoughtful follow-up suggestions
-
-To use your own OpenAI API key:
-1. Get an API key from [OpenAI](https://platform.openai.com/)
-2. Add it to your `.env` file as `OPENAI_API_KEY=your_key_here`
-
-### Claude & Cloud Code Integration
-- Use Claude models through Anthropic's API
-- Execute tools in local Docker container with Claude Code
-- Track tool usage and revenue
-- Access to file system, memory, web browsing, and GitHub tools
-
-To use Claude and Cloud Code:
-1. Get an API key from [Anthropic](https://console.anthropic.com/)
-2. Add it to your `.env` file as `ANTHROPIC_API_KEY=your_key_here`
-3. Set `ENABLE_TOOL_EXECUTION=true` to enable tool execution
-
-## Tech Stack
-
-- Frontend: React/TypeScript with Vite
-- Backend: Node.js/Express
-- Database: MySQL
-- Real-time: Socket.io
-- AI: OpenAI API, Anthropic/Claude API, Claude Code
-- Development: Docker with hot reloading
-
-## API Documentation
-
-### Agent Endpoints
-
-- `GET /api/agents` - List all agents
-- `POST /api/agents` - Create a new agent with an initial command
-  ```json
-  {
-    "command": "Your initial command here",
-    "initialCapabilities": ["Optional", "capabilities", "list"],
-    "personalityProfile": "Optional personality description"
-  }
-  ```
-- `GET /api/agents/:id` - Get agent details
-- `PUT /api/agents/:id` - Update agent properties
-- `DELETE /api/agents/:id` - Delete an agent
-- `POST /api/agents/:id/command` - Send a command to an agent
-- `GET /api/agents/:id/current-plan` - Get current plan for an agent
-
-### Plan Endpoints
-
-- `GET /api/plans/:planId` - Get plan details
-- `POST /api/plans/:planId/approve` - Approve a plan for execution
-- `POST /api/plans/:planId/reject` - Reject a plan
-- `POST /api/plans/:planId/follow-up` - Generate follow-up suggestions
-
-## License
-
-MIT License
-
-## Unified Agent Architecture
-
-This project has been updated to use a single unified agent model instead of specialized agent types. This brings several benefits:
-
-### Benefits
-
-- **Simplified Implementation**: A single agent class replaces multiple specialized agent classes
-- **Dynamic Capabilities**: Agents adapt to any task by automatically generating plans
-- **Self-Descriptive**: LLM-generated agent names and descriptions based on their purpose
-- **Evolving Identity**: Agents update their metadata as they take on new tasks
-- **Consistent API**: A streamlined interface for creating and interacting with agents
-
-### Migrating from Previous Versions
-
-If you're updating from a previous version:
-
-1. Run the database migration scripts:
-   ```
-   # For unified agent architecture (if updating from pre-unified version)
-   mysql -u username -p database_name < init-sql/02-unified-agent-migration.sql
-   
-   # For tool execution support
-   mysql -u username -p database_name < init-sql/03-execution-mode-migration.sql
-   ```
-
-2. Remove the specialized agent files (optional but recommended):
-   ```
-   ./cleanup-specialized-agents.sh
-   ```
-
-3. Update any front-end code that references agent types
-
-The cleanup script removes the obsolete specialized agent implementations that are no longer needed with the unified architecture.
-
-### Implementation Details
-
-- Agent metadata (name/description) is generated by an LLM based on the initial command
-- Each new command potentially updates the agent's identity to better reflect its purpose
-- The agent's capabilities are configurable and can be expanded over time
-- Settings can store configuration parameters that were previously type-specific
-
-## Acknowledgments
-
-Built with AI tools including Claude and GPT-4
+For more information, see the [OpenAI Agents SDK documentation](https://openai.github.io/openai-agents-python/) and [Claude Code documentation](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview)
