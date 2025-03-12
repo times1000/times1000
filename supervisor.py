@@ -17,9 +17,26 @@ import sys
 import subprocess
 import json
 import asyncio
-import readline
 import atexit
 from typing import Optional, List
+
+# Platform-specific readline setup
+try:
+    # Try to use the gnureadline module on macOS for better compatibility
+    if sys.platform == 'darwin':
+        try:
+            import gnureadline as readline
+            readline_module = "gnureadline"
+        except ImportError:
+            import readline
+            readline_module = "readline"
+    else:
+        import readline
+        readline_module = "readline"
+except ImportError:
+    # Fallback if readline is not available
+    readline = None
+    readline_module = None
 
 from agents import Agent, Runner, WebSearchTool, ItemHelpers, MessageOutputItem
 from agents import ToolCallItem, ToolCallOutputItem, function_tool, trace
@@ -298,56 +315,105 @@ async def process_streamed_response(agent, input_items):
 # Setup command history with readline
 def setup_readline():
     """Sets up readline with command history if possible, otherwise disables it."""
+    # Check if readline module is available
+    if readline is None:
+        print("Readline module not available. Command history disabled.")
+        return False
+        
     # Skip readline setup if we're in an environment that doesn't support it well
     if not sys.stdin.isatty():
         print("Non-interactive terminal detected. Command history disabled.")
         return False
         
     try:
-        # Test if we can use readline effectively
-        readline.get_current_history_length()
+        # Try to use a persistent history file
+        home_dir = os.path.expanduser("~")
+        history_dir = os.path.join(home_dir, ".supervisor_history")
         
-        # Try to use a temporary file for history
-        import tempfile
-        with tempfile.NamedTemporaryFile(prefix="supervisor_history_", delete=False) as temp_file:
-            histfile = temp_file.name
+        try:
+            # Create directory if it doesn't exist
+            os.makedirs(history_dir, exist_ok=True)
+            histfile = os.path.join(history_dir, "history")
+        except:
+            # Fall back to a temporary file if we can't create the directory
+            import tempfile
+            with tempfile.NamedTemporaryFile(prefix="supervisor_history_", delete=False) as temp_file:
+                histfile = temp_file.name
         
         # Set history length
         readline.set_history_length(1000)
         
+        # Add a test entry to history to verify it works
+        readline.add_history("test command")
+        
+        # Configure readline based on which module we're using
+        if readline_module == "gnureadline":
+            # GNU readline has consistent behavior
+            readline.parse_and_bind("tab: complete")
+            readline.parse_and_bind('"\e[A": previous-history')  # Up arrow
+            readline.parse_and_bind('"\e[B": next-history')      # Down arrow
+        elif sys.platform == 'darwin':  # macOS with standard readline
+            # macOS libedit emulation
+            readline.parse_and_bind("bind ^I rl_complete")
+            readline.parse_and_bind("bind ^[[A ed-search-prev-history")
+            readline.parse_and_bind("bind ^[[B ed-search-next-history")
+        else:
+            # Standard readline on other platforms
+            readline.parse_and_bind("tab: complete")
+            readline.parse_and_bind('"\e[A": previous-history')  # Up arrow
+            readline.parse_and_bind('"\e[B": next-history')      # Down arrow
+        
         # Save history on exit
         atexit.register(readline.write_history_file, histfile)
         
-        # Enable arrow key navigation 
-        readline.parse_and_bind("tab: complete")
-        if sys.platform != 'win32':
-            # These bindings work on Unix-like systems - using raw strings for escape sequences
-            readline.parse_and_bind(r'"\e[A": previous-history')  # Up arrow
-            readline.parse_and_bind(r'"\e[B": next-history')      # Down arrow
-            
-        print(f"Command history enabled (temporary file)")
+        # Try to read history file if it exists
+        try:
+            readline.read_history_file(histfile)
+        except:
+            # If reading fails, create a new file
+            readline.write_history_file(histfile)
+        
+        print(f"Command history enabled using {readline_module} module")
+        print(f"History file: {histfile}")
         return True
+        
     except Exception as e:
         print(f"Warning: Readline functionality limited: {str(e)}")
         print("Command history will not be available for this session.")
         return False
 
 # Main function to run the agent loop
-def safe_input(prompt):
-    """Safely get input even if readline isn't working properly."""
-    print(prompt, end='', flush=True)
-    try:
-        line = sys.stdin.readline()
-        if not line:  # EOF
+def safe_input(prompt, readline_available=True):
+    """Safely get input with readline support when available."""
+    if readline_available:
+        # Use the standard input function to leverage readline capabilities
+        try:
+            return input(prompt)
+        except EOFError:
             print("\nEOF detected. Exiting.")
             sys.exit(0)
-        return line.rstrip('\n')
-    except KeyboardInterrupt:
-        print("\nKeyboard interrupt detected. Exiting.")
-        sys.exit(0)
-    except Exception as e:
-        print(f"\nCritical input error: {str(e)}. Exiting.")
-        sys.exit(1)
+        except KeyboardInterrupt:
+            print("\nKeyboard interrupt detected. Exiting.")
+            sys.exit(0)
+        except Exception as e:
+            print(f"\nInput error with readline: {str(e)}. Trying fallback method...")
+            readline_available = False  # Fall back to direct stdin
+    
+    # Fallback method without readline
+    if not readline_available:
+        print(prompt, end='', flush=True)
+        try:
+            line = sys.stdin.readline()
+            if not line:  # EOF
+                print("\nEOF detected. Exiting.")
+                sys.exit(0)
+            return line.rstrip('\n')
+        except KeyboardInterrupt:
+            print("\nKeyboard interrupt detected. Exiting.")
+            sys.exit(0)
+        except Exception as e:
+            print(f"\nCritical input error: {str(e)}. Exiting.")
+            sys.exit(1)
 
 async def main():
     # Setup readline for command history
@@ -359,11 +425,12 @@ async def main():
 
     try:
         print("\nSupervisor Agent ready. Type your request or 'exit' to quit.")
+        print("Use up/down arrow keys to navigate command history.") if readline_available else None
         
         while True:
             try:
                 # Use appropriate input method
-                user_input = safe_input("\n> ")
+                user_input = safe_input("\n> ", readline_available)
                 
                 # Check for exit command
                 if user_input.lower() in ('exit', 'quit'):
