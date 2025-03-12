@@ -1,5 +1,5 @@
 """
-supervisor.py - A supervisor agent that orchestrates specialized agents for coding tasks
+main.py - Entry point for the Times1000 application with supervisor agent orchestration
 
 This script implements a supervisor agent that delegates tasks to specialized agents:
 - CodeAgent: Handles code writing, debugging, and explanation
