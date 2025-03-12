@@ -57,38 +57,29 @@ class BrowserComputerManager:
     """Manages browser resources for the application."""
     
     def __init__(self):
-        self._playwright = None
-        self._browser = None
-        self._page = None
+        self._computer = None
         
-    async def get_computer(self) -> AsyncContextManager[LocalPlaywrightComputer]:
-        """Returns a context manager for a LocalPlaywrightComputer."""
-        # Create a fresh computer each time
-        computer = LocalPlaywrightComputer(
+    async def init_computer(self):
+        """Initialize a browser computer."""
+        # Create and initialize the computer
+        self._computer = LocalPlaywrightComputer(
             headless=False,
             browser_type="chromium",
             start_url="about:blank"
         )
-        
-        @contextlib.asynccontextmanager
-        async def _computer_context():
-            try:
-                # Enter the computer's context
-                await computer.__aenter__()
-                yield computer
-            finally:
-                # We don't exit the context here to keep the browser open
-                pass
-                
-        return _computer_context()
+        await self._computer.__aenter__()
+        return self._computer
     
     async def close(self):
-        """Close all browser resources."""
-        try:
-            # No browser resources to clean up since we create fresh each time
-            pass
-        except Exception as e:
-            print(f"Error during browser cleanup: {str(e)}")
+        """Close browser resources."""
+        if self._computer is not None:
+            try:
+                await self._computer.__aexit__(None, None, None)
+                self._computer = None
+                print("Browser closed successfully")
+            except Exception as e:
+                print(f"Error during browser cleanup: {str(e)}")
+                self._computer = None
 
 # Create a singleton instance
 browser_manager = BrowserComputerManager()
@@ -211,167 +202,59 @@ SELF-SUFFICIENCY PRINCIPLES:
 
 async def create_browser_agent():
     """Creates a browser agent with computer capabilities."""
+    # Use browser manager to handle initialization
+    global browser_initialized
     
-    # Create browser navigation functionality
-    @function_tool
-    async def browser_navigate(url: str) -> str:
-        """Navigates to a URL in the browser and returns the content."""
-        global browser_initialized
+    if not browser_initialized:
+        print("Initializing browser for the first time...")
+        browser_initialized = True
         
-        if not browser_initialized:
-            print("Initializing browser for the first time...")
-            browser_initialized = True
-            
-        print(f"Navigating to: {url}")
-            
-        # Create a fresh computer instance
-        computer = LocalPlaywrightComputer(
-            headless=False, 
-            browser_type="chromium",
-            start_url="about:blank"
-        )
-        
-        try:
-            # Initialize the browser
-            await computer.__aenter__()
-            
-            # Navigate to the URL
-            await computer.navigate(url)
-            
-            # Take a screenshot
-            screenshot = await computer.screenshot()
-            
-            # Get page title
-            title = await computer.page.title()
-            
-            # Get page content
-            content = await computer.page.content()
-            
-            # Extract text content (simple version)
-            text_content = await computer.page.evaluate("""() => {
-                return document.body.innerText.slice(0, 2000); // First 2000 characters
-            }""")
-            
-            return f"""Successfully navigated to {url}.
-            
-Page Title: {title}
-            
-Page Content Preview: 
-{text_content}
-            
-Screenshot captured for visual reference."""
-            
-        except Exception as e:
-            print(f"Browser navigation error: {str(e)}")
-            return f"Error navigating to {url}: {str(e)}"
-            
-    # Create browser interaction functionality
-    @function_tool
-    async def browser_interact(url: str, action: str) -> str:
-        """Interacts with elements on a webpage."""
-        global browser_initialized
-        
-        if not browser_initialized:
-            print("Initializing browser for the first time...")
-            browser_initialized = True
-        
-        print(f"Interacting with: {url}, Action: {action}")
-        
-        # Create a fresh computer instance
-        computer = LocalPlaywrightComputer(
-            headless=False, 
-            browser_type="chromium",
-            start_url="about:blank"
-        )
-        
-        try:
-            # Initialize the browser
-            await computer.__aenter__()
-            
-            # Navigate to the URL
-            await computer.navigate(url)
-            
-            # Perform the requested action
-            if "click" in action.lower():
-                # Get selector information from the action
-                selector = action.split("click")[1].strip()
-                try:
-                    await computer.page.click(selector)
-                    await asyncio.sleep(2)  # Wait for page to update
-                    
-                    # Get updated content
-                    new_content = await computer.page.evaluate("""() => {
-                        return document.body.innerText.slice(0, 2000);
-                    }""")
-                    
-                    return f"Successfully clicked on '{selector}' at {url}. New content: {new_content}"
-                except Exception as e:
-                    return f"Error clicking on '{selector}': {str(e)}"
-            
-            elif "scroll" in action.lower():
-                # Scroll down the page
-                await computer.page.evaluate("window.scrollBy(0, 500)")
-                await asyncio.sleep(1)
-                
-                # Get visible content
-                new_content = await computer.page.evaluate("""() => {
-                    return document.body.innerText.slice(0, 2000);
-                }""")
-                
-                return f"Successfully scrolled the page at {url}. New content visible: {new_content}"
-            
-            else:
-                return f"Unsupported action: {action}. Supported actions include 'click [selector]' and 'scroll'."
-        
-        except Exception as e:
-            print(f"Browser interaction error: {str(e)}")
-            return f"Error during browser interaction: {str(e)}"
+    # Get computer instance from manager
+    computer = await browser_manager.init_computer()
     
-    # Create the agent with browser navigation and interaction capabilities
+    # Create the agent using ComputerTool directly, following the example code
     return Agent(
         name="BrowserAgent",
-        instructions="""You are a web browser expert specializing in navigating to websites and interacting with them.
+        instructions="""You are a web browser expert specializing in interacting with websites.
 
 CAPABILITIES:
-- Navigate to specific URLs and extract content
-- Interact with elements on webpages
-- Scroll pages and click on elements
-- Report back what you find with detail
-
-TOOLS AND USAGE:
-1. browser_navigate:
-   - Takes a URL as a parameter
-   - Navigates the browser to that URL
-   - Returns page title, content preview, and takes a screenshot
-   - ALWAYS USE THIS FIRST to navigate to a URL before any interactions
-
-2. browser_interact:
-   - Takes a URL and an action parameter
-   - Performs the requested action on that webpage
-   - Supported actions:
-     * "click selector" - Click on an element matching the selector
-     * "scroll" - Scroll down the page to see more content
+- Navigate to specific URLs
+- Click on elements, fill out forms, and interact with content
+- Scroll and navigate through pages
+- Capture screenshots to see website content
+- Extract data from web pages
 
 COMMON TASKS:
-- "Go to website X and tell me what's there" → Use browser_navigate with full URL
-- "Go to Y and click on the first headline" → Use browser_navigate first, then browser_interact
-- "Scroll down on Z website" → Use browser_navigate first, then browser_interact with "scroll"
+- "Go to website X" - Navigate to a specific URL
+- "Click on Y" - Click on a specific element on the page
+- "Scroll down" - Scroll down to see more content
+- "Find and click on X" - Search for and interact with elements
+- "Fill out form with X" - Complete forms on websites
+- "Search for X on website Y" - Use website search functionality
 
 STRATEGY:
-1. When a user asks you to visit a website, ALWAYS use the browser_navigate tool first
-2. Always provide the full URL with the "https://" or "http://" prefix
-3. Parse the returned content to understand what's on the page
-4. If interaction is needed, use browser_interact with the same URL
-5. Report detailed information about what you find on the page
+1. Always start by navigating to the requested website
+   - For any specific URL, use: await computer.navigate("https://example.com")
+   - Always include the full URL with "https://" or "http://" prefix
+   - For Reddit: await computer.navigate("https://www.reddit.com")
+   - For news sites, social media, or any other requested site, use the full URL
+2. Take a screenshot to see the current page state
+3. Identify and click on interesting or requested elements
+4. Scroll to view more content when needed
+5. Provide detailed descriptions of what you see on the page
+6. Extract and summarize the most relevant information
 
-EXAMPLES:
-- "Go to example.com" → Use browser_navigate with "https://example.com"
-- "Visit Reddit and show me top posts" → Use browser_navigate with "https://www.reddit.com" first
-- "Go to news site and click on the first headline" → Use browser_navigate first, then browser_interact
+SELF-SUFFICIENCY:
+1. Be proactive in exploring websites based on user requests
+2. Explain what you're seeing and what options are available
+3. Make intelligent decisions about what to click when asked to explore
+4. When asked to find "interesting" content, look for popular, trending, or featured items
             """,
             handoff_description="A specialized agent for direct website interaction via browser",
-            tools=[browser_navigate, browser_interact],
-            # Use the default model
+            tools=[ComputerTool(computer)],
+            # Use computer-use-preview model when using ComputerTool
+            model="computer-use-preview",
+            model_settings=ModelSettings(truncation="auto"),
         )
 
 async def create_search_agent():
