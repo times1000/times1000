@@ -68,6 +68,8 @@ DIRECT PLAYWRIGHT TOOLS:
 8. playwright_get_text: Get text content from the page or element
    - Example: playwright_get_text()
    - Example: playwright_get_text(selector="#main-content")
+   - Example: playwright_get_text(includeHtml=True)
+   - Example: playwright_get_text(maxLength=10000)
 
 9. playwright_evaluate: Run JavaScript in the browser
    - Example: playwright_evaluate(script="document.querySelector('.hidden').style.display = 'block'")
