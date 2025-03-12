@@ -4,3 +4,4 @@ gnureadline>=6.3.8; platform_system == "Darwin"  # macOS only dependency for bet
 playwright>=1.40.0
 markdownify>=1.1.0
 beautifulsoup4>=4.9.0
+python-dotenv>=1.0.0  # For loading environment variables from .env file

@@ -18,6 +18,24 @@ pip install -r requirements.txt
 python -m playwright install
 ```
 
+### API Keys
+
+This application requires an OpenAI API key to function. You need to set the `OPENAI_API_KEY` environment variable before running:
+
+```bash
+# Set your OpenAI API key (replace YOUR_API_KEY with your actual key)
+export OPENAI_API_KEY=YOUR_API_KEY  # Linux/macOS
+set OPENAI_API_KEY=YOUR_API_KEY     # Windows
+```
+
+You can also create a `.env` file in the project root with your API key:
+
+```
+OPENAI_API_KEY=YOUR_API_KEY
+```
+
+If you don't have an API key, you can get one from: https://platform.openai.com/api-keys
+
 ## Usage
 
 ```bash

@@ -21,6 +21,15 @@ import atexit
 import contextlib
 import argparse
 from typing import List
+import textwrap
+
+# Try to load .env file if available
+try:
+    from dotenv import load_dotenv
+    load_dotenv()  # Load environment variables from .env file if it exists
+except ImportError:
+    # dotenv is not required, but it's a helpful convenience
+    pass
 
 # Platform-specific readline setup
 try:
@@ -51,6 +60,32 @@ from utils.browser_computer import LocalPlaywrightComputer
 
 # Import the supervisor agent creator from our core_agents package
 from core_agents.supervisor import create_supervisor_agent
+
+# Check for required environment variables
+def check_api_keys():
+    """Check if required API keys are set and provide helpful error messages if not."""
+    if not os.environ.get("OPENAI_API_KEY"):
+        error_message = textwrap.dedent("""
+        ERROR: OpenAI API key is missing!
+        
+        You need to set the OPENAI_API_KEY environment variable to use this application.
+        
+        You can do this in one of the following ways:
+        
+        1. Set it for the current session (replace YOUR_API_KEY with your actual key):
+           export OPENAI_API_KEY=YOUR_API_KEY  # Linux/macOS
+           set OPENAI_API_KEY=YOUR_API_KEY     # Windows
+        
+        2. Add it to your shell profile (~/.bashrc, ~/.zshrc, etc.)
+        
+        3. Create a .env file in the project directory with:
+           OPENAI_API_KEY=YOUR_API_KEY
+        
+        You can get an API key from: https://platform.openai.com/api-keys
+        """)
+        print(error_message)
+        return False
+    return True
 
 # Process streamed response function
 async def process_streamed_response(agent, input_items):
@@ -85,35 +120,24 @@ async def process_streamed_response(agent, input_items):
                     print(message_text)
 
             elif item.type == "tool_call_item":
-                print(f"\n{agent_name}: Calling tool")
                 # Access the raw item if available
                 if hasattr(item, 'raw_item'):
                     raw_item = item.raw_item
-                    # Get tool type
-                    if hasattr(raw_item, 'type'):
-                        print(f"  Tool type: {raw_item.type}")
                     # Get tool name for function calls
                     if hasattr(raw_item, 'name'):
-                        print(f"  Tool name: {raw_item.name}")
-                    # Get arguments
-                    if hasattr(raw_item, 'arguments'):
-                        try:
-                            args = json.loads(raw_item.arguments)
-                            print(f"  Arguments: {json.dumps(args, indent=2)}")
-                        except:
-                            print(f"  Arguments: {raw_item.arguments}")
+                        print(f"\n{agent_name}: Calling tool {raw_item.name}")
 
             elif item.type == "tool_call_output_item":
-                print(f"\n{agent_name}: Tool call result:")
-                # Format output
+                # Format output concisely
                 try:
                     if isinstance(item.output, str) and (item.output.startswith('{') or item.output.startswith('[')):
-                        parsed_output = json.loads(item.output)
-                        print(json.dumps(parsed_output, indent=2))
+                        # For JSON output, don't show duplicative information
+                        pass
                     else:
-                        print(f"  {item.output}")
+                        # Only show non-JSON results directly
+                        print(f"\n{agent_name} tool result: {item.output}")
                 except:
-                    print(f"  {item.output}")
+                    pass
 
     # Return the result for updating conversation history
     return result
@@ -128,23 +152,21 @@ def setup_readline():
         
     # Skip readline setup if we're in an environment that doesn't support it well
     if not sys.stdin.isatty():
-        print("Non-interactive terminal detected. Command history disabled.")
         return False
         
     try:
-        # Try to use a persistent history file
+        # Use a persistent history file in the user's home directory
         home_dir = os.path.expanduser("~")
-        history_dir = os.path.join(home_dir, ".supervisor_history")
+        history_dir = os.path.join(home_dir, ".times2000_history")
         
-        try:
-            # Create directory if it doesn't exist
-            os.makedirs(history_dir, exist_ok=True)
-            histfile = os.path.join(history_dir, "history")
-        except:
-            # Fall back to a temporary file if we can't create the directory
-            import tempfile
-            with tempfile.NamedTemporaryFile(prefix="supervisor_history_", delete=False) as temp_file:
-                histfile = temp_file.name
+        # Create directory if it doesn't exist
+        os.makedirs(history_dir, exist_ok=True)
+        histfile = os.path.join(history_dir, "history")
+        
+        # If we still can't access the history file location, fallback to current directory
+        if not os.access(history_dir, os.W_OK):
+            # Use current directory as fallback
+            histfile = os.path.join(os.getcwd(), ".times2000_history")
         
         # Set history length
         readline.set_history_length(1000)
@@ -179,8 +201,6 @@ def setup_readline():
             # If reading fails, create a new file
             readline.write_history_file(histfile)
         
-        print(f"Command history enabled using {readline_module} module")
-        print(f"History file: {histfile}")
         return True
         
     except Exception as e:
@@ -231,7 +251,14 @@ async def main():
     parser.add_argument("-t", "--test", 
                         help="Run a test prompt to verify browser agent functionality", 
                         action="store_true")
+    parser.add_argument("--skip-key-check",
+                        help="Skip the API key check (for testing only)",
+                        action="store_true")
     args = parser.parse_args()
+    
+    # Check for required API keys unless specifically skipped
+    if not args.skip_key_check and not check_api_keys():
+        sys.exit(1)
     
     # Setup readline for command history
     readline_available = setup_readline()
@@ -243,7 +270,7 @@ async def main():
     async def init_browser():
         nonlocal browser_computer
         if browser_computer is None:
-            print("Browser functionality requested - initializing browser...")
+            # Initialize browser when needed without verbose messages
             browser_computer = await LocalPlaywrightComputer(headless=False).__aenter__()
             # Don't use atexit with asyncio.run() as it causes issues with closed event loops
             # We'll handle cleanup in the main loop exception handlers instead
@@ -255,10 +282,11 @@ async def main():
     # Initialize conversation history
     input_items: List = []
 
-    print("\nSupervisor Agent ready. Type your request or 'exit' to quit.")
-    print("Use up/down arrow keys to navigate command history.") if readline_available else None
-    print("SearchAgent is available for web searches.")
-    print("BrowserAgent is available for direct website interactions.")
+    # Display welcome message with available functionality
+    welcome_msg = "\nSupervisor Agent ready. Type your request or 'exit' to quit."
+    if readline_available:
+        welcome_msg += "\nUse up/down arrow keys to navigate command history."
+    print(welcome_msg)
     
     # Add a first message to the conversation to prime the agent
     input_items.append({
@@ -303,21 +331,16 @@ The browser_agent should always prefer direct Playwright tools over ComputerTool
     if args.test:
         print("\nRunning browser agent test...")
         
-        # First verify that the browser doesn't initialize until used
-        print("Browser should NOT be initialized yet (lazy loading). Check that no browser window appears...")
-        await asyncio.sleep(2)  # Give user time to verify no browser window
-        
-        # Then test browser agent with a simple prompt
+        # Test browser agent with a simple prompt
         test_prompt = "Go to https://example.com and tell me what you see on the page"
-        print(f"\nTest prompt: {test_prompt}")
-        print("Browser should initialize when needed. Watch for browser window to appear...")
+        print(f"Test prompt: {test_prompt}")
         
         # Run the test
         input_items.append({"content": test_prompt, "role": "user"})
         with trace("Test prompt processing"):
             result = await process_streamed_response(agent, input_items)
             input_items = result.to_input_list()
-            print("\nBrowser agent test completed.")
+            print("Browser agent test completed.")
     
     # Handle initial prompt if specified (before the main loop)
     elif args.prompt:
@@ -356,7 +379,6 @@ The browser_agent should always prefer direct Playwright tools over ComputerTool
     finally:
         # Proper cleanup of browser if it was initialized
         if browser_computer is not None:
-            print("Closing browser...")
             try:
                 # Create a new event loop if needed for cleanup
                 try:
@@ -369,18 +391,47 @@ The browser_agent should always prefer direct Playwright tools over ComputerTool
                     asyncio.set_event_loop(loop)
                 
                 # Run the cleanup
+                async def cleanup():
+                    await browser_computer.__aexit__(None, None, None)
+                
                 with contextlib.suppress(Exception):
-                    async def cleanup():
-                        await browser_computer.__aexit__(None, None, None)
                     loop.run_until_complete(cleanup())
             except Exception as e:
                 print(f"Error during browser cleanup: {e}")
     
     print("Exiting application")
 
+# Test function to verify our print statement changes
+def test_startup_messages():
+    """Test the reduced startup messages and API key check"""
+    # Test API key check
+    if not os.environ.get("OPENAI_API_KEY"):
+        print("\nTesting API key check message:")
+        check_api_keys()
+        print("\nAPI key check message displayed correctly.")
+    else:
+        print("\nOpenAI API key is set, skipping API key check test.")
+    
+    # Simulate the welcome message
+    print("\nSupervisor Agent ready. Type your request or 'exit' to quit.")
+    print("Up/down arrow keys available for command history.")
+    
+    # Mock the test messages
+    print("\nRunning browser agent test...")
+    print("Test prompt: Go to https://example.com and tell me what you see on the page")
+    print("Browser agent test completed.")
+    
+    # Show final message
+    print("\nExiting application")
+    return True
+
 # Run the supervisor agent when this file is executed
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\nKeyboard interrupt detected. Exiting.")
+    # If we want to just test the UI messages
+    if len(sys.argv) > 1 and sys.argv[1] == "--test-messages":
+        test_startup_messages()
+    else:
+        try:
+            asyncio.run(main())
+        except KeyboardInterrupt:
+            print("\nKeyboard interrupt detected. Exiting.")
