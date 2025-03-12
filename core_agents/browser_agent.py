@@ -1,9 +1,117 @@
 """
 browser_agent.py - Specialized agent for direct website interaction via browser
+with enhanced error handling and retry mechanisms
 """
 
+import logging
+from functools import wraps
+from typing import Dict, Any, Callable, Awaitable, Optional, TypeVar, cast, Union
+
 from agents import Agent, ComputerTool, ModelSettings
+
+# Custom ToolOutput class since it's not available in the agents package
+class ToolOutput:
+    """Simple class to represent tool output with possible error"""
+    def __init__(self, value: Any = None, error: str = None):
+        self.value = value
+        self.error = error
 from utils.browser_computer import create_browser_tools
+from utils import with_retry, RetryStrategy, AgentResult, ConfidenceLevel, ErrorCategory
+
+# Configure logging
+logger = logging.getLogger("BrowserAgent")
+
+# Type variable for return values
+T = TypeVar('T')
+
+# Create decorated versions of browser tools with retry logic
+def create_resilient_browser_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Wraps browser tools with retry logic for increased resilience
+    
+    Args:
+        browser_tools: Dictionary of browser tools
+        
+    Returns:
+        Dictionary of wrapped browser tools with retry capabilities
+    """
+    resilient_tools = {}
+    
+    for tool_name, tool in browser_tools.items():
+        if callable(getattr(tool, 'call', None)):
+            original_call = tool.call
+            
+            # Different tools need different retry strategies
+            if "navigate" in tool_name:
+                # Navigation needs more retries with longer backoff
+                max_retries = 3
+                strategy = RetryStrategy.EXPONENTIAL_BACKOFF
+                base_delay = 2.0
+            elif any(action in tool_name for action in ["click", "fill", "select"]):
+                # Interaction tools need quick retries
+                max_retries = 2
+                strategy = RetryStrategy.LINEAR_BACKOFF
+                base_delay = 1.0
+            elif "screenshot" in tool_name:
+                # Screenshots can retry quickly
+                max_retries = 2
+                strategy = RetryStrategy.IMMEDIATE
+                base_delay = 0.5
+            else:
+                # Default retry strategy
+                max_retries = 2
+                strategy = RetryStrategy.LINEAR_BACKOFF
+                base_delay = 1.0
+            
+            @wraps(original_call)
+            async def resilient_call(self, *args, _original_call=original_call, 
+                                    _max_retries=max_retries, _strategy=strategy, 
+                                    _base_delay=base_delay, **kwargs):
+                """Wrapped call function with retry logic"""
+                
+                # Define the function to retry
+                async def call_with_args():
+                    try:
+                        result = await _original_call(self, *args, **kwargs)
+                        return result
+                    except Exception as e:
+                        logger.warning(f"Error in browser tool: {str(e)}")
+                        raise
+                
+                # Apply retry logic
+                retry_result = await with_retry(
+                    max_retries=_max_retries,
+                    retry_strategy=_strategy,
+                    base_delay=_base_delay
+                )(call_with_args)()
+                
+                # Convert AgentResult to appropriate return format
+                if isinstance(retry_result, AgentResult):
+                    if retry_result.success:
+                        return retry_result.value
+                    else:
+                        # For failed operations, include retry information in error message
+                        error_msg = f"Failed after {retry_result.retry_count} attempts: {retry_result.error_message}"
+                        if retry_result.retry_count > 0:
+                            error_msg += f" (Retried {retry_result.retry_count} times)"
+                        
+                        # Return error details in a format that matches original tool's error format
+                        if hasattr(self, 'build_error_output'):
+                            return self.build_error_output(error_msg)
+                        else:
+                            # Generic error format
+                            return ToolOutput(error=error_msg)
+                else:
+                    # Should not happen, but handle just in case
+                    return retry_result
+            
+            # Replace the original call method with our resilient version
+            tool.call = resilient_call.__get__(tool, type(tool))
+        
+        # Add the (potentially) wrapped tool to our result dictionary
+        resilient_tools[tool_name] = tool
+    
+    return resilient_tools
 
 async def create_browser_agent(browser_initializer):
     """Creates a browser agent with navigation and interaction capabilities."""
@@ -13,16 +121,20 @@ async def create_browser_agent(browser_initializer):
         print("Browser computer initialized successfully")
         
         # Get all browser tools 
-        browser_tools = create_browser_tools(browser_computer)
+        base_browser_tools = create_browser_tools(browser_computer)
+        
+        # Wrap tools with retry logic
+        browser_tools = create_resilient_browser_tools(base_browser_tools)
         print("Browser tools created successfully")
     except Exception as e:
+        logger.error(f"Error initializing browser or creating tools: {e}")
         print(f"Error initializing browser or creating tools: {e}")
         # Re-raise to fail initialization
         raise
     
     return Agent(
         name="BrowserAgent",
-        instructions="""You are a browser interaction expert specializing in website navigation and interaction.
+        instructions="""You are a browser interaction expert specializing in website navigation and interaction, with enhanced error handling and recovery capabilities.
 
 CAPABILITIES:
 - Navigate to URLs directly using the playwright_navigate tool
@@ -31,6 +143,18 @@ CAPABILITIES:
 - Fill out forms using the playwright_fill tool
 - Make HTTP requests directly using playwright_get, playwright_post, etc.
 - Execute JavaScript in the browser using playwright_evaluate
+- Automatically retry failed operations with intelligent backoff strategies
+- Provide detailed error information and recovery attempts
+
+ENHANCED ERROR HANDLING:
+- All tools now feature automatic retry mechanisms with different strategies:
+  * Navigation operations retry up to 3 times with exponential backoff
+  * Interaction operations (click, fill) retry up to 2 times with linear backoff
+  * Screenshot operations retry up to 2 times immediately
+- When errors occur, you'll receive information about:
+  * The nature of the error (network, timeout, selector not found, etc.)
+  * How many retry attempts were made
+  * Suggestions for alternative approaches
 
 PREFERRED TOOL ORDER:
 1. Use direct Playwright tools whenever possible (playwright_*)
@@ -126,7 +250,23 @@ WORKFLOW FOR INTERACTING WITH ELEMENTS:
 4. Interact with elements using the appropriate tool (click, fill, select, etc.)
 5. Verify the result with another screenshot or text extraction
 
-Always provide detailed error information to the user if an interaction fails, explaining what you tried and what went wrong.
+ERROR RECOVERY STRATEGIES:
+1. For element not found errors:
+   - Try alternative selectors (ID, class, text content)
+   - Use playwright_get_elements() to find available elements
+   - Check if the page has changed with a screenshot
+
+2. For navigation errors:
+   - Verify the URL is correctly formatted
+   - Try increasing the timeout value
+   - Check if the site is accessible
+   
+3. For timeout errors:
+   - Try using a different waitUntil value (load, domcontentloaded, networkidle)
+   - Break down complex actions into smaller steps
+   - Check if the page has JavaScript that might be blocking
+
+Always provide detailed error information to the user if an interaction fails after all retries, explaining what you tried, what went wrong, and what alternative approaches could be taken.
 """,
         handoff_description="A specialized agent for direct website interaction via browser",
         tools=[

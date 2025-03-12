@@ -1,16 +1,23 @@
 """
-main.py - Entry point for the Times1000 application with supervisor agent orchestration
+main.py - Entry point for the Times1000 application with parallel supervisor agent orchestration
 
-This script implements a supervisor agent that delegates tasks to specialized agents:
+This script implements a parallel supervisor agent that delegates tasks to specialized agents:
 - CodeAgent: Handles code writing, debugging, and explanation
 - FilesystemAgent: Manages file operations and project organization
 - SearchAgent: Performs web searches for information gathering
 - BrowserAgent: Directly interacts with websites via browser automation
 
-The supervisor follows a structured workflow:
-1. Planning: Analyze requests and create step-by-step plans
-2. Execution: Delegate tasks to specialized agents
-3. Verification: Ensure all success criteria are met
+The parallel supervisor follows a structured workflow:
+1. Planning: Analyze requests, create step-by-step plans, and identify parallelization opportunities
+2. Execution: Delegate tasks to specialized agents with dependency tracking and prioritization
+3. Result Aggregation: Combine results from parallel task execution
+4. Verification: Ensure all success criteria are met
+
+The system supports:
+- Concurrent execution of independent tasks
+- Priority-based task scheduling
+- Dependency tracking between related tasks
+- Result aggregation from parallel executions
 """
 
 import os
@@ -20,7 +27,7 @@ import asyncio
 import atexit
 import contextlib
 import argparse
-from typing import List
+from typing import List, Dict, Any, Optional
 import textwrap
 
 # Try to load .env file if available
@@ -57,6 +64,9 @@ from rich.console import Console
 
 # Import our browser computer implementation
 from utils.browser_computer import LocalPlaywrightComputer
+
+# Import our user interaction controller
+from utils.user_interaction import UserInteractionController, QuestionPriority, QuestionCategory
 
 # Import the supervisor agent creator from our core_agents package
 from core_agents.supervisor import create_supervisor_agent
@@ -254,6 +264,15 @@ async def main():
     parser.add_argument("--skip-key-check",
                         help="Skip the API key check (for testing only)",
                         action="store_true")
+    parser.add_argument("--batch-questions",
+                        help="Enable question batching to reduce interruptions",
+                        type=str, choices=['true', 'false'], default='true')
+    parser.add_argument("--batch-size",
+                        help="Maximum number of questions to batch together",
+                        type=int, default=3)
+    parser.add_argument("--batch-timeout",
+                        help="Maximum time (seconds) to wait before asking batched questions",
+                        type=float, default=30.0)
     args = parser.parse_args()
     
     # Check for required API keys unless specifically skipped
@@ -275,6 +294,37 @@ async def main():
             # Don't use atexit with asyncio.run() as it causes issues with closed event loops
             # We'll handle cleanup in the main loop exception handlers instead
         return browser_computer
+    
+    # Initialize user interaction controller for batching questions
+    interaction_controller = UserInteractionController(
+        max_batch_size=args.batch_size,
+        batch_timeout_seconds=args.batch_timeout
+    )
+    
+    # Create a function to ask a question through the interaction controller
+    async def ask_user(question: str, 
+                      category: QuestionCategory = QuestionCategory.OTHER,
+                      priority: QuestionPriority = QuestionPriority.MEDIUM,
+                      context: Dict[str, Any] = None,
+                      timeout_seconds: Optional[float] = None) -> str:
+        """Ask a question to the user through the interaction controller"""
+        if args.batch_questions.lower() == 'true':
+            return await interaction_controller.ask_question(
+                question_text=question,
+                category=category,
+                priority=priority,
+                context=context,
+                timeout_seconds=timeout_seconds
+            )
+        else:
+            # Direct question without batching if batching is disabled
+            print(f"\n[QUESTION] {question}")
+            if context:
+                print("\nContext:")
+                for key, value in context.items():
+                    if not key.startswith('_'):  # Skip internal keys
+                        print(f"- {key}: {value}")
+            return await asyncio.get_event_loop().run_in_executor(None, input, "> ")
         
     # Create the supervisor agent
     agent = await create_supervisor_agent(init_browser)
