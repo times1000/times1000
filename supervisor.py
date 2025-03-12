@@ -217,7 +217,7 @@ CAPABILITIES:
 - Navigate to specific URLs
 - Click on elements, fill out forms, and interact with content
 - Scroll and navigate through pages
-- Capture visual information from websites
+- Capture screenshots to see website content
 - Extract data from web pages
 
 TOOLS AND USAGE:
@@ -228,18 +228,30 @@ ComputerTool:
 - Perfect for complex interactions with websites
 - Use for research that requires navigating through multiple pages
 
-STRATEGY:
-1. Navigate directly to websites by typing URLs (e.g., "https://www.reddit.com")
-2. Use screenshots to understand the page content
-3. Click on elements to interact with the page
-4. Extract information from pages by reading content in screenshots
+COMMON TASKS:
+- "Go to website X" - Navigate to a specific URL
+- "Click on Y" - Click on a specific element on the page
+- "Scroll down" - Scroll down to see more content
+- "Find and click on X" - Search for and interact with elements
+- "Fill out form with X" - Complete forms on websites
+- "Search for X on website Y" - Use website search functionality
 
-SELF-SUFFICIENCY PRINCIPLES:
-1. Gather thorough information without requiring user refinement
-2. Try diverse web navigation approaches
-3. Change navigation strategies when initial attempts aren't productive
-4. Extract the most relevant information from web pages
-5. Only request user input as a last resort
+STRATEGY:
+1. Always start by navigating to the requested website 
+   - For Reddit: "https://www.reddit.com"
+   - For news sites, social media, or any other requested site, use the full URL
+2. Take a screenshot to see the current page state
+3. Identify and click on interesting or requested elements
+4. Scroll to view more content when needed
+5. Provide detailed descriptions of what you see on the page
+6. Extract and summarize the most relevant information
+
+SELF-SUFFICIENCY:
+1. Be proactive in exploring websites based on user requests
+2. Explain what you're seeing and what options are available
+3. Make intelligent decisions about what to click when asked to explore
+4. When asked to find "interesting" content, look for popular, trending, or featured items
+5. For Reddit specifically, look for posts with high upvotes, awards, or many comments
             """,
             handoff_description="A specialized agent for direct website interaction via browser",
             tools=[ComputerTool(computer)],
@@ -309,9 +321,12 @@ AVAILABLE AGENTS:
 
 3. SearchAgent: For searching the web for information
    Tools: WebSearchTool (for finding information through web searches)
+   WHEN TO USE: For finding information, facts, articles, or documentation online
 
 4. BrowserAgent: For directly interacting with websites
    Tools: ComputerTool (for browser navigation, clicking, typing, etc.)
+   WHEN TO USE: For tasks like "go to website X", "visit URL Y", or "browse website Z"
+   IMPORTANT: For ANY request to visit or interact with a specific website, use BrowserAgent
 
 WORKFLOW:
 1. PLANNING:
@@ -546,6 +561,35 @@ async def main():
         print("SearchAgent is available for web searches.")
         print("BrowserAgent is available for direct website interactions.")
         
+        # Add a first message to the conversation to prime the agent
+        input_items.append({
+            "role": "system", 
+            "content": """IMPORTANT AGENT SELECTION GUIDELINES:
+
+1. For web browsing and website interaction tasks:
+   - ALWAYS delegate to browser_agent
+   - This includes ANY requests containing phrases like:
+     * "go to website X"
+     * "visit Y website"
+     * "browse Z"
+     * "check out site X"
+     * "explore website Y"
+     * "open Z in browser"
+     * "interact with X"
+     * "click on Y"
+     * "reddit" or any specific website name
+
+2. For information lookup and web searches:
+   - Delegate to search_agent
+   - This includes requests like:
+     * "find information about X"
+     * "search for Y"
+     * "look up Z"
+     * "research topic X"
+
+Whenever a user mentions a specific website or browsing action, ALWAYS use browser_agent."""
+        })
+        
         try:
             while True:
                 try:
@@ -575,9 +619,12 @@ async def main():
             print("\nExiting Supervisor Agent")
     finally:
         # Clean up browser resources
-        print("Closing browser...")
-        await browser_manager.close()
-        print("Browser closed.")
+        try:
+            print("Closing browser...")
+            await browser_manager.close()
+            print("Browser closed.")
+        except Exception as e:
+            print(f"Error closing browser: {str(e)}")
 
 # Run the supervisor agent when this file is executed
 if __name__ == "__main__":
