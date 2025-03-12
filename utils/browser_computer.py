@@ -271,19 +271,47 @@ def create_browser_tools(browser_computer):
         # Navigate to the URL
         try:
             print(f"Calling browser goto with url={url}")
-            response = await bc._page.goto(url, timeout=nav_timeout, wait_until=nav_waitUntil)
-            print(f"Navigation response: {response}")
-            
-            current_url = await bc._page.url()
-            print(f"Current URL: {current_url}")
-            
-            page_title = await bc._page.title()
-            print(f"Page title: {page_title}")
-            
-            # Extract page content using BeautifulSoup
+            # Use goto and catch any issues
             try:
-                # Get content using reliable HTML content method
-                html_content = await bc._page.content()
+                response = await bc._page.goto(url, timeout=nav_timeout, wait_until=nav_waitUntil)
+                print(f"Navigation response status: {response.status if response else 'No response'}")
+            except Exception as nav_err:
+                print(f"Initial navigation error: {type(nav_err).__name__}: {nav_err}")
+                # Try with different wait_until option as fallback
+                try:
+                    print(f"Retrying with 'domcontentloaded' option")
+                    response = await bc._page.goto(url, timeout=nav_timeout, wait_until="domcontentloaded")
+                    print(f"Fallback navigation response status: {response.status if response else 'No response'}")
+                except Exception as fallback_err:
+                    print(f"Fallback navigation also failed: {type(fallback_err).__name__}: {fallback_err}")
+            
+            # Wait a moment for page to stabilize
+            await asyncio.sleep(1)
+            
+            # Get current URL - this should be safe even if navigation had issues
+            try:
+                current_url = await bc._page.url()
+                print(f"Current URL: {current_url}")
+            except Exception as url_err:
+                print(f"Error getting current URL: {type(url_err).__name__}: {url_err}")
+                current_url = url  # Fallback to requested URL
+            
+            # Get page title - this should be safe even if navigation had issues
+            try:
+                page_title = await bc._page.title()
+                print(f"Page title: {page_title}")
+            except Exception as title_err:
+                print(f"Error getting page title: {type(title_err).__name__}: {title_err}")
+                page_title = "Unknown title"  # Fallback
+            
+            # Extract page content using BeautifulSoup - this approach is more reliable than evaluate
+            try:
+                # Get HTML content directly - this method is more reliable than evaluate
+                try:
+                    html_content = await bc._page.content()
+                except Exception as content_err:
+                    print(f"Error getting page content: {type(content_err).__name__}: {content_err}")
+                    return f"Navigated to: {current_url} - {page_title}\nUnable to extract page content."
                 
                 # Parse with BeautifulSoup
                 soup = BeautifulSoup(html_content, 'html.parser')
@@ -309,7 +337,7 @@ def create_browser_tools(browser_computer):
                     for script in main_content.find_all(['script', 'style']):
                         script.decompose()
                     
-                    # Get text content
+                    # Get text content 
                     text_content = main_content.get_text(separator='\n', strip=True)
                     
                     # Clean up the text
@@ -331,8 +359,8 @@ def create_browser_tools(browser_computer):
                 
                 return f"Successfully navigated to: {current_url} - {page_title}\n\nPage content:\n{preview_text}"
             except Exception as e:
-                print(f"Error getting page content: {type(e).__name__}: {e}")
-                return f"Successfully navigated to: {current_url} - {page_title}"
+                print(f"Error processing page content: {type(e).__name__}: {e}")
+                return f"Successfully navigated to: {current_url} - {page_title}\nUnable to extract page content details."
         except Exception as e:
             print(f"Navigation error: {type(e).__name__}: {e}")
             return f"Error navigating to {url}: {e}"
