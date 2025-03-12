@@ -50,40 +50,7 @@ from rich.console import Console
 # Import our browser computer implementation
 from browser_computer import LocalPlaywrightComputer
 
-# Browser computer manager
-from playwright.async_api import async_playwright, Browser, Page
-
-class BrowserComputerManager:
-    """Manages browser resources for the application."""
-    
-    def __init__(self):
-        self._computer = None
-        
-    async def init_computer(self):
-        """Initialize a browser computer."""
-        # Create and initialize the computer
-        self._computer = LocalPlaywrightComputer(
-            headless=False,
-            browser_type="chromium",
-            start_url="about:blank"
-        )
-        await self._computer.__aenter__()
-        return self._computer
-    
-    async def close(self):
-        """Close browser resources."""
-        if self._computer is not None:
-            try:
-                await self._computer.__aexit__(None, None, None)
-                self._computer = None
-                print("Browser closed successfully")
-            except Exception as e:
-                print(f"Error during browser cleanup: {str(e)}")
-                self._computer = None
-
-# Create a singleton instance
-browser_manager = BrowserComputerManager()
-browser_initialized = False
+# No browser management code needed
 
 # Define custom tools
 @function_tool
@@ -202,17 +169,10 @@ SELF-SUFFICIENCY PRINCIPLES:
 
 async def create_browser_agent():
     """Creates a browser agent with computer capabilities."""
-    # Use browser manager to handle initialization
-    global browser_initialized
+    # Create a computer instance using a context manager
+    computer = await LocalPlaywrightComputer().__aenter__()
     
-    if not browser_initialized:
-        print("Initializing browser for the first time...")
-        browser_initialized = True
-        
-    # Get computer instance from manager
-    computer = await browser_manager.init_computer()
-    
-    # Create the agent using ComputerTool directly, following the example code
+    # Create the agent with ComputerTool, exactly like the example
     return Agent(
         name="BrowserAgent",
         instructions="""You are a web browser expert specializing in interacting with websites.
@@ -557,6 +517,9 @@ async def main():
     # Setup readline for command history
     readline_available = setup_readline()
     
+    # Browser instance is created and cleaned up by the agent itself
+    browser_computer = None
+    
     try:
         # Create the supervisor agent (which will also create the web agent with browser)
         agent = await create_supervisor_agent()
@@ -654,13 +617,8 @@ Whenever a user mentions a specific website or browsing action, ALWAYS use brows
         except KeyboardInterrupt:
             print("\nExiting Supervisor Agent")
     finally:
-        # Clean up browser resources
-        try:
-            print("Closing browser...")
-            await browser_manager.close()
-            print("Browser closed.")
-        except Exception as e:
-            print(f"Error closing browser: {str(e)}")
+        # No browser cleanup needed - the browser is closed when the process exits
+        print("Exiting application")
 
 # Run the supervisor agent when this file is executed
 if __name__ == "__main__":
