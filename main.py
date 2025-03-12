@@ -132,19 +132,18 @@ def setup_readline():
         return False
         
     try:
-        # Try to use a persistent history file
+        # Use a persistent history file in the user's home directory
         home_dir = os.path.expanduser("~")
-        history_dir = os.path.join(home_dir, ".supervisor_history")
+        history_dir = os.path.join(home_dir, ".times2000_history")
         
-        try:
-            # Create directory if it doesn't exist
-            os.makedirs(history_dir, exist_ok=True)
-            histfile = os.path.join(history_dir, "history")
-        except:
-            # Fall back to a temporary file if we can't create the directory
-            import tempfile
-            with tempfile.NamedTemporaryFile(prefix="supervisor_history_", delete=False) as temp_file:
-                histfile = temp_file.name
+        # Create directory if it doesn't exist
+        os.makedirs(history_dir, exist_ok=True)
+        histfile = os.path.join(history_dir, "history")
+        
+        # If we still can't access the history file location, fallback to current directory
+        if not os.access(history_dir, os.W_OK):
+            # Use current directory as fallback
+            histfile = os.path.join(os.getcwd(), ".times2000_history")
         
         # Set history length
         readline.set_history_length(1000)
@@ -298,7 +297,6 @@ Whenever a user mentions a specific website or browsing action, ALWAYS use brows
         
         # First verify that the browser doesn't initialize until used
         print("Browser should NOT be initialized yet (lazy loading). Check that no browser window appears...")
-        await asyncio.sleep(2)  # Give user time to verify no browser window
         
         # Then test browser agent with a simple prompt
         test_prompt = "Go to https://example.com and tell me what you see on the page"
@@ -362,9 +360,10 @@ Whenever a user mentions a specific website or browsing action, ALWAYS use brows
                     asyncio.set_event_loop(loop)
                 
                 # Run the cleanup
+                async def cleanup():
+                    await browser_computer.__aexit__(None, None, None)
+                
                 with contextlib.suppress(Exception):
-                    async def cleanup():
-                        await browser_computer.__aexit__(None, None, None)
                     loop.run_until_complete(cleanup())
             except Exception as e:
                 print(f"Error during browser cleanup: {e}")

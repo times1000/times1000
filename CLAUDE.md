@@ -3,11 +3,11 @@
 ## Key Commands
 - Install dependencies: `pip install -r requirements.txt`
 - Install Playwright: `python -m playwright install`
-- Run application: `python supervisor.py`
-- Test browser functionality: `python supervisor.py -t`
+- Run application: `python main.py`
+- Test browser functionality: `python main.py -t`
 
 ## Development Workflow
-1. Test changes with `python supervisor.py -t`
+1. Test changes with `python main.py -t`
 2. Verify all functionality works
 3. Fix ALL errors found during testing (related or not)
 4. Commit with descriptive message
