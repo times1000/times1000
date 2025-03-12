@@ -65,7 +65,7 @@ class BrowserComputerManager:
             self._computer = LocalPlaywrightComputer(
                 headless=False,
                 browser_type="chromium",
-                start_url="https://www.google.com"
+                start_url="about:blank"
             )
             
         @contextlib.asynccontextmanager
@@ -88,6 +88,7 @@ class BrowserComputerManager:
 
 # Create a singleton instance
 browser_manager = BrowserComputerManager()
+browser_initialized = False
 
 # Define custom tools
 @function_tool
@@ -206,12 +207,26 @@ SELF-SUFFICIENCY PRINCIPLES:
 
 async def create_browser_agent():
     """Creates a browser agent with computer capabilities."""
-    # Get a computer instance from the manager
-    async with await browser_manager.get_computer() as computer:
-        # Create the agent with computer tool only
-        return Agent(
-            name="BrowserAgent",
-            instructions="""You are a web browser expert specializing in interacting with websites.
+    # Create a proxy function to lazily initialize the browser
+    async def get_lazy_computer():
+        global browser_initialized
+        if not browser_initialized:
+            print("Initializing browser for the first time...")
+            browser_initialized = True
+        return await browser_manager.get_computer()
+    
+    # Create a wrapper function for the computer tool
+    async def wrapped_computer_tool(input_data):
+        async with await get_lazy_computer() as computer:
+            # Create the ComputerTool with the actual computer instance
+            computer_tool = ComputerTool(computer)
+            # Forward the call to the real computer tool
+            return await computer_tool(input_data)
+    
+    # Create the agent with the wrapped computer tool
+    return Agent(
+        name="BrowserAgent",
+        instructions="""You are a web browser expert specializing in interacting with websites.
 
 CAPABILITIES:
 - Navigate to specific URLs
@@ -237,8 +252,10 @@ COMMON TASKS:
 - "Search for X on website Y" - Use website search functionality
 
 STRATEGY:
-1. Always start by navigating to the requested website 
-   - For Reddit: "https://www.reddit.com"
+1. Always start by navigating to the requested website using the navigate method
+   - IMPORTANT: For any specific URL, use: await computer.navigate("https://example.com")
+   - Always include the full URL with "https://" or "http://" prefix
+   - For Reddit: await computer.navigate("https://www.reddit.com")
    - For news sites, social media, or any other requested site, use the full URL
 2. Take a screenshot to see the current page state
 3. Identify and click on interesting or requested elements
@@ -254,7 +271,7 @@ SELF-SUFFICIENCY:
 5. For Reddit specifically, look for posts with high upvotes, awards, or many comments
             """,
             handoff_description="A specialized agent for direct website interaction via browser",
-            tools=[ComputerTool(computer)],
+            tools=[wrapped_computer_tool],
             # Use computer-use-preview model when using ComputerTool
             model="computer-use-preview",
             model_settings=ModelSettings(truncation="auto"),

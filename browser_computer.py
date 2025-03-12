@@ -44,7 +44,7 @@ CUA_KEY_TO_PLAYWRIGHT_KEY = {
 class LocalPlaywrightComputer(AsyncComputer):
     """A computer implementation using a local Playwright browser."""
 
-    def __init__(self, headless=False, browser_type="chromium", start_url="https://www.google.com"):
+    def __init__(self, headless=False, browser_type="chromium", start_url="about:blank"):
         """
         Initialize the browser computer.
         
@@ -99,6 +99,10 @@ class LocalPlaywrightComputer(AsyncComputer):
         self._playwright = await async_playwright().start()
         self._browser, self._page = await self._get_browser_and_page()
         return self
+        
+    async def navigate(self, url: str) -> None:
+        """Navigate to a specific URL."""
+        await self.page.goto(url)
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Close browser and stop Playwright when exiting the context."""
