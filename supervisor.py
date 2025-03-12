@@ -632,8 +632,17 @@ Whenever a user mentions a specific website or browsing action, ALWAYS use brows
         # Handle test prompt if specified (before the main loop)
         if args.test:
             print("\nRunning browser agent test...")
+            
+            # First verify that the browser doesn't initialize until used
+            print("Browser should NOT be initialized yet. Check for browser window...")
+            await asyncio.sleep(2)  # Give user time to verify no browser window
+            
+            # Then test browser agent with a simple prompt
             test_prompt = "Go to https://example.com and tell me what you see on the page"
             print(f"\nTest prompt: {test_prompt}")
+            print("Browser SHOULD initialize soon. Watch for browser window...")
+            
+            # Run the test
             input_items.append({"content": test_prompt, "role": "user"})
             with trace("Test prompt processing"):
                 result = await process_streamed_response(agent, input_items)
