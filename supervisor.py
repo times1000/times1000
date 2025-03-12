@@ -24,15 +24,8 @@ from typing import Optional, List
 from agents import Agent, Runner, WebSearchTool, ItemHelpers, MessageOutputItem
 from agents import ToolCallItem, ToolCallOutputItem, function_tool, trace
 
-# Check and install rich library for markdown rendering if needed
-try:
-    from rich.markdown import Markdown
-    from rich.console import Console
-except ImportError:
-    print("Installing rich library for markdown rendering...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "rich"])
-    from rich.markdown import Markdown
-    from rich.console import Console
+from rich.markdown import Markdown
+from rich.console import Console
 
 # Define custom tools
 @function_tool
