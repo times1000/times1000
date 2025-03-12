@@ -19,6 +19,7 @@ import json
 import asyncio
 import atexit
 import contextlib
+import argparse
 from typing import Optional, List, AsyncContextManager
 
 # Platform-specific readline setup
@@ -577,6 +578,16 @@ def safe_input(prompt, readline_available=True):
             sys.exit(1)
 
 async def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description="Run the Supervisor Agent")
+    parser.add_argument("-p", "--prompt", 
+                        help="Initial prompt to run at startup", 
+                        type=str)
+    parser.add_argument("-t", "--test", 
+                        help="Run a test prompt to verify browser agent functionality", 
+                        action="store_true")
+    args = parser.parse_args()
+    
     # Setup readline for command history
     readline_available = setup_readline()
     
@@ -620,8 +631,28 @@ async def main():
 Whenever a user mentions a specific website or browsing action, ALWAYS use browser_agent."""
         })
         
+        # Handle test prompt if specified (before the main loop)
+        if args.test:
+            print("\nRunning browser agent test...")
+            test_prompt = "Go to https://example.com and tell me what you see on the page"
+            print(f"\nTest prompt: {test_prompt}")
+            input_items.append({"content": test_prompt, "role": "user"})
+            with trace("Test prompt processing"):
+                result = await process_streamed_response(agent, input_items)
+                input_items = result.to_input_list()
+                print("\nBrowser agent test completed.")
+        
+        # Handle initial prompt if specified (before the main loop)
+        elif args.prompt:
+            print(f"\nRunning initial prompt: {args.prompt}")
+            input_items.append({"content": args.prompt, "role": "user"})
+            with trace("Initial prompt processing"):
+                result = await process_streamed_response(agent, input_items)
+                input_items = result.to_input_list()
+        
         try:
             while True:
+                
                 try:
                     # Use appropriate input method
                     user_input = safe_input("\n> ", readline_available)
