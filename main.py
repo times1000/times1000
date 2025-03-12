@@ -141,6 +141,21 @@ async def process_streamed_response(agent, input_items):
                         if raw_item.name == "browser_agent":
                             print(f"\nBrowserAgent: Working...")
                             last_browser_tool_call = True
+                            
+                            # Fix for double-encoded JSON - check if the input is a string that contains JSON
+                            if hasattr(raw_item, 'parameters') and isinstance(raw_item.parameters, dict) and 'input' in raw_item.parameters:
+                                input_param = raw_item.parameters['input']
+                                if isinstance(input_param, str) and input_param.startswith('{') and input_param.endswith('}'):
+                                    try:
+                                        import json
+                                        # Try to parse as JSON 
+                                        parsed_input = json.loads(input_param)
+                                        # Replace with parsed object
+                                        raw_item.parameters['input'] = parsed_input
+                                        print("Fixed double-encoded JSON input")
+                                    except json.JSONDecodeError:
+                                        # Not valid JSON, leave as is
+                                        pass
                         else:
                             print(f"\n{agent_name}: Calling tool {raw_item.name}")
                             last_browser_tool_call = False

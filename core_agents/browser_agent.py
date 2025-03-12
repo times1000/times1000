@@ -135,6 +135,14 @@ async def create_browser_agent(browser_initializer):
         # Re-raise to fail initialization
         raise
     
+    # Create a patched version of the browser agent that can handle JSON-encoded inputs
+    # We'll create this by extending the Agent class
+    import json
+    from functools import wraps
+    
+    # We'll keep the original agent reference with no changes
+    # (This was causing a self-reference issue)
+    
     return Agent(
         name="BrowserAgent",
         instructions="""You are a browser interaction expert specializing in website navigation and interaction, with enhanced error handling and recovery capabilities.

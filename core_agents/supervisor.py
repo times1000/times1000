@@ -387,6 +387,8 @@ async def create_supervisor_agent(browser_initializer) -> Agent:
     browser_agent = await create_browser_agent(browser_initializer)
     search_agent = await create_search_agent()
     
+    # Let's go back to the original approach without a wrapper
+    
     # Create the parallel supervisor
     parallel_supervisor = ParallelSupervisorAgent(
         code_agent=code_agent,
