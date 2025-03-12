@@ -98,9 +98,9 @@ class LocalPlaywrightComputer(AsyncComputer):
             page = await browser.new_page()
             await page.set_viewport_size({"width": width, "height": height})
             
-            # Set a longer timeout for initial navigation
+            # Set a shorter timeout for initial navigation
             try:
-                await page.goto(self._start_url, timeout=30000)
+                await page.goto(self._start_url, timeout=10000)
             except Exception as e:
                 print(f"Initial navigation error (continuing anyway): {str(e)}")
                 
@@ -121,7 +121,7 @@ class LocalPlaywrightComputer(AsyncComputer):
     async def navigate(self, url: str) -> None:
         """Navigate to a specific URL."""
         try:
-            await self.page.goto(url, timeout=60000)
+            await self.page.goto(url, timeout=10000)
         except Exception as e:
             print(f"Navigation error: {str(e)}")
             # Try to continue despite error

@@ -212,10 +212,10 @@ SELF-SUFFICIENCY PRINCIPLES:
 async def create_browser_agent():
     """Creates a browser agent with computer capabilities."""
     
-    # Create a simple wrapper function for browser functionality
+    # Create browser navigation functionality
     @function_tool
     async def browser_navigate(url: str) -> str:
-        """Navigates to a URL in the browser."""
+        """Navigates to a URL in the browser and returns the content."""
         global browser_initialized
         
         if not browser_initialized:
@@ -241,44 +241,136 @@ async def create_browser_agent():
             # Take a screenshot
             screenshot = await computer.screenshot()
             
-            # Return page info
-            return f"Successfully navigated to {url}. Screenshot taken."
+            # Get page title
+            title = await computer.page.title()
+            
+            # Get page content
+            content = await computer.page.content()
+            
+            # Extract text content (simple version)
+            text_content = await computer.page.evaluate("""() => {
+                return document.body.innerText.slice(0, 2000); // First 2000 characters
+            }""")
+            
+            return f"""Successfully navigated to {url}.
+            
+Page Title: {title}
+            
+Page Content Preview: 
+{text_content}
+            
+Screenshot captured for visual reference."""
+            
         except Exception as e:
             print(f"Browser navigation error: {str(e)}")
             return f"Error navigating to {url}: {str(e)}"
+            
+    # Create browser interaction functionality
+    @function_tool
+    async def browser_interact(url: str, action: str) -> str:
+        """Interacts with elements on a webpage."""
+        global browser_initialized
+        
+        if not browser_initialized:
+            print("Initializing browser for the first time...")
+            browser_initialized = True
+        
+        print(f"Interacting with: {url}, Action: {action}")
+        
+        # Create a fresh computer instance
+        computer = LocalPlaywrightComputer(
+            headless=False, 
+            browser_type="chromium",
+            start_url="about:blank"
+        )
+        
+        try:
+            # Initialize the browser
+            await computer.__aenter__()
+            
+            # Navigate to the URL
+            await computer.navigate(url)
+            
+            # Perform the requested action
+            if "click" in action.lower():
+                # Get selector information from the action
+                selector = action.split("click")[1].strip()
+                try:
+                    await computer.page.click(selector)
+                    await asyncio.sleep(2)  # Wait for page to update
+                    
+                    # Get updated content
+                    new_content = await computer.page.evaluate("""() => {
+                        return document.body.innerText.slice(0, 2000);
+                    }""")
+                    
+                    return f"Successfully clicked on '{selector}' at {url}. New content: {new_content}"
+                except Exception as e:
+                    return f"Error clicking on '{selector}': {str(e)}"
+            
+            elif "scroll" in action.lower():
+                # Scroll down the page
+                await computer.page.evaluate("window.scrollBy(0, 500)")
+                await asyncio.sleep(1)
+                
+                # Get visible content
+                new_content = await computer.page.evaluate("""() => {
+                    return document.body.innerText.slice(0, 2000);
+                }""")
+                
+                return f"Successfully scrolled the page at {url}. New content visible: {new_content}"
+            
+            else:
+                return f"Unsupported action: {action}. Supported actions include 'click [selector]' and 'scroll'."
+        
+        except Exception as e:
+            print(f"Browser interaction error: {str(e)}")
+            return f"Error during browser interaction: {str(e)}"
     
-    # Create the agent with simplified browser navigation capabilities
+    # Create the agent with browser navigation and interaction capabilities
     return Agent(
         name="BrowserAgent",
-        instructions="""You are a web browser expert specializing in navigating to websites.
+        instructions="""You are a web browser expert specializing in navigating to websites and interacting with them.
 
 CAPABILITIES:
-- Navigate to specific URLs
-- Report back what you find
+- Navigate to specific URLs and extract content
+- Interact with elements on webpages
+- Scroll pages and click on elements
+- Report back what you find with detail
 
 TOOLS AND USAGE:
-browser_navigate:
-- Takes a URL as a parameter
-- Navigates the browser to that URL
-- Returns a confirmation message and takes a screenshot
+1. browser_navigate:
+   - Takes a URL as a parameter
+   - Navigates the browser to that URL
+   - Returns page title, content preview, and takes a screenshot
+   - ALWAYS USE THIS FIRST to navigate to a URL before any interactions
+
+2. browser_interact:
+   - Takes a URL and an action parameter
+   - Performs the requested action on that webpage
+   - Supported actions:
+     * "click selector" - Click on an element matching the selector
+     * "scroll" - Scroll down the page to see more content
 
 COMMON TASKS:
-- "Go to website X" - Navigate to a specific URL
-- "Visit Y website" - Navigate to a specific URL
-- "Open Z in browser" - Navigate to a specific URL
+- "Go to website X and tell me what's there" → Use browser_navigate with full URL
+- "Go to Y and click on the first headline" → Use browser_navigate first, then browser_interact
+- "Scroll down on Z website" → Use browser_navigate first, then browser_interact with "scroll"
 
 STRATEGY:
-1. When a user asks you to visit a website, use the browser_navigate tool
+1. When a user asks you to visit a website, ALWAYS use the browser_navigate tool first
 2. Always provide the full URL with the "https://" or "http://" prefix
-3. Report what you know about the website to the user
+3. Parse the returned content to understand what's on the page
+4. If interaction is needed, use browser_interact with the same URL
+5. Report detailed information about what you find on the page
 
 EXAMPLES:
-- If user says "Go to example.com" → Use browser_navigate with "https://example.com"
-- If user says "Visit Reddit" → Use browser_navigate with "https://www.reddit.com"
-- If user says "Show me Google" → Use browser_navigate with "https://www.google.com"
+- "Go to example.com" → Use browser_navigate with "https://example.com"
+- "Visit Reddit and show me top posts" → Use browser_navigate with "https://www.reddit.com" first
+- "Go to news site and click on the first headline" → Use browser_navigate first, then browser_interact
             """,
             handoff_description="A specialized agent for direct website interaction via browser",
-            tools=[browser_navigate],
+            tools=[browser_navigate, browser_interact],
             # Use the default model
         )
 
