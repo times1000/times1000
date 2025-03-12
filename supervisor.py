@@ -204,26 +204,16 @@ SELF-SUFFICIENCY PRINCIPLES:
     tools=[run_shell_command],
 )
 
-async def create_web_agent():
-    """Creates the web agent with browser capabilities."""
+async def create_browser_agent():
+    """Creates a browser agent with computer capabilities."""
     # Get a computer instance from the manager
     async with await browser_manager.get_computer() as computer:
-        # Create the agent with both web search and computer tools
+        # Create the agent with computer tool only
         return Agent(
-            name="WebAgent",
-            instructions="""You are a web expert specializing in finding information online and interacting with websites.
+            name="BrowserAgent",
+            instructions="""You are a web browser expert specializing in interacting with websites.
 
 CAPABILITIES:
-1. Web Search: Find information using web search queries
-2. Browser Interaction: Navigate and interact with web pages directly
-
-When searching for information:
-- Formulate effective search queries
-- Find relevant, up-to-date information from authoritative sources
-- Summarize findings concisely
-- Provide links to original sources
-
-When interacting with websites:
 - Navigate to specific URLs
 - Click on elements, fill out forms, and interact with content
 - Scroll and navigate through pages
@@ -231,46 +221,80 @@ When interacting with websites:
 - Extract data from web pages
 
 TOOLS AND USAGE:
-WebSearchTool:
-- Searches the web for information on a given query
-- Returns search results with titles, descriptions, and URLs
-- Use for finding documentation, tutorials, examples, and technical answers
-
 ComputerTool:
 - Controls a web browser to interact with websites
 - Captures screenshots to see website content
 - Can click, type, scroll, and navigate within web pages
-- Perfect for more complex interactions beyond simple searches
+- Perfect for complex interactions with websites
 - Use for research that requires navigating through multiple pages
 
 STRATEGY:
-1. For simple information queries, use WebSearchTool
-2. For complex interactions or when search results aren't sufficient, use ComputerTool
-3. Combine both tools for comprehensive research tasks
+1. Navigate directly to websites by typing URLs (e.g., "https://www.reddit.com")
+2. Use screenshots to understand the page content
+3. Click on elements to interact with the page
+4. Extract information from pages by reading content in screenshots
 
 SELF-SUFFICIENCY PRINCIPLES:
 1. Gather thorough information without requiring user refinement
-2. Try diverse search queries and web navigation approaches
-3. Reformulate queries or change navigation strategies when initial attempts aren't productive
-4. Extract the most relevant information from search results and web pages
+2. Try diverse web navigation approaches
+3. Change navigation strategies when initial attempts aren't productive
+4. Extract the most relevant information from web pages
 5. Only request user input as a last resort
             """,
-            handoff_description="A specialized agent for web searches and website interaction",
-            tools=[WebSearchTool(), ComputerTool(computer)],
+            handoff_description="A specialized agent for direct website interaction via browser",
+            tools=[ComputerTool(computer)],
             # Use computer-use-preview model when using ComputerTool
             model="computer-use-preview",
             model_settings=ModelSettings(truncation="auto"),
         )
 
-# Create a placeholder for the web agent
-web_agent = None  # Will be initialized in main()
+async def create_search_agent():
+    """Creates a search agent with web search capabilities."""
+    # Create the agent with web search tool only
+    return Agent(
+        name="SearchAgent",
+        instructions="""You are a web search expert specializing in finding information online.
+
+CAPABILITIES:
+- Formulate effective search queries
+- Find relevant, up-to-date information from authoritative sources
+- Summarize findings concisely
+- Provide links to original sources
+
+TOOLS AND USAGE:
+WebSearchTool:
+- Searches the web for information on a given query
+- Returns search results with titles, descriptions, and URLs
+- Use for finding documentation, tutorials, examples, and technical answers
+
+STRATEGY:
+1. Formulate clear and specific search queries
+2. Evaluate search results for relevance and accuracy
+3. Synthesize information from multiple sources
+4. Provide concise summaries with links to sources
+
+SELF-SUFFICIENCY PRINCIPLES:
+1. Gather thorough information without requiring user refinement
+2. Try diverse search queries to explore topics from multiple angles
+3. Reformulate queries when initial searches aren't productive
+4. Filter results to identify the most relevant information
+5. Only request user input as a last resort
+        """,
+        handoff_description="A specialized agent for web searches and information gathering",
+        tools=[WebSearchTool()],
+    )
+
+# Create placeholders for the agents
+browser_agent = None
+search_agent = None
 
 # Create the supervisor agent with specialized agents as tools
 async def create_supervisor_agent() -> Agent:
     """Creates the Supervisor agent that orchestrates specialized agents as tools."""
-    # Create web agent with browser capabilities
-    global web_agent
-    web_agent = await create_web_agent()
+    # Create specialized web agents
+    global browser_agent, search_agent
+    browser_agent = await create_browser_agent()
+    search_agent = await create_search_agent()
     
     return Agent(
         name="Supervisor",
@@ -283,10 +307,11 @@ AVAILABLE AGENTS:
 2. FilesystemAgent: For file system operations and project organization
    Tools: run_shell_command (for directories, file operations, system queries)
 
-3. WebAgent: For searching the web and interacting with websites
-   Tools: 
-   - WebSearchTool: For finding information through web searches
-   - ComputerTool: For direct browser interaction and navigation
+3. SearchAgent: For searching the web for information
+   Tools: WebSearchTool (for finding information through web searches)
+
+4. BrowserAgent: For directly interacting with websites
+   Tools: ComputerTool (for browser navigation, clicking, typing, etc.)
 
 WORKFLOW:
 1. PLANNING:
@@ -298,7 +323,8 @@ WORKFLOW:
    - Execute steps sequentially by delegating to specialized agents
    - IMPORTANT: Never implement code changes yourself - always delegate to CodeAgent
    - Clearly explain to CodeAgent what changes are needed and let it handle implementation
-   - For web research, use WebAgent with both search and browser capabilities
+   - For web information gathering, use SearchAgent with WebSearchTool
+   - For direct website interaction, use BrowserAgent with ComputerTool
    - Verify each step's success before proceeding
    - Adjust approach or revise plan if a step fails
 
@@ -325,9 +351,13 @@ Always provide practical, executable solutions and persist until successful.""",
                 tool_name="filesystem_agent",
                 tool_description="Delegate filesystem operations to a specialized filesystem agent",
             ),
-            web_agent.as_tool(
-                tool_name="web_agent",
-                tool_description="Delegate web searches and browser interactions to a specialized web agent",
+            search_agent.as_tool(
+                tool_name="search_agent",
+                tool_description="Delegate web searches to a specialized search agent",
+            ),
+            browser_agent.as_tool(
+                tool_name="browser_agent",
+                tool_description="Delegate website interactions to a specialized browser agent",
             ),
         ],
     )
@@ -513,7 +543,8 @@ async def main():
     
         print("\nSupervisor Agent ready. Type your request or 'exit' to quit.")
         print("Use up/down arrow keys to navigate command history.") if readline_available else None
-        print("Browser-enabled WebAgent is available for web interactions.")
+        print("SearchAgent is available for web searches.")
+        print("BrowserAgent is available for direct website interactions.")
         
         try:
             while True:

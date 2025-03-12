@@ -25,8 +25,15 @@
 - Start the application: `python supervisor.py`
 - Deactivate when done: `deactivate`
 
-## Browser Computer Setup
-- The WebAgent now includes browser computer capabilities
-- Uses Playwright to control a Chrome browser instance
+## Web Agents Setup
+- Two separate agents for web interactions:
+  1. SearchAgent: Uses WebSearchTool for finding information online
+  2. BrowserAgent: Uses ComputerTool with Playwright for direct website interaction
 - Install Playwright browsers: `python -m playwright install`
-- The browser can perform operations like navigating, clicking, and typing
+- The BrowserAgent can perform operations like navigating, clicking, and typing
+- The SearchAgent can perform web searches for information gathering
+
+## Agent Selection Guidelines
+- For information lookup: Use SearchAgent
+- For interacting with websites: Use BrowserAgent
+- Don't use both agents in the same task (model compatibility issue)
