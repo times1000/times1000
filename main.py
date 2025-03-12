@@ -101,7 +101,10 @@ def check_api_keys():
 async def process_streamed_response(agent, input_items):
     # Create console for rich text rendering
     console = Console()
-
+    
+    # Track the last tool call to identify which agent a result belongs to
+    last_browser_tool_call = False
+    
     # Create a streamed result
     result = Runner.run_streamed(agent, input_items)
 
@@ -135,7 +138,12 @@ async def process_streamed_response(agent, input_items):
                     raw_item = item.raw_item
                     # Get tool name for function calls
                     if hasattr(raw_item, 'name'):
-                        print(f"\n{agent_name}: Calling tool {raw_item.name}")
+                        if raw_item.name == "browser_agent":
+                            print(f"\nBrowserAgent: Working...")
+                            last_browser_tool_call = True
+                        else:
+                            print(f"\n{agent_name}: Calling tool {raw_item.name}")
+                            last_browser_tool_call = False
 
             elif item.type == "tool_call_output_item":
                 # Format output concisely
@@ -144,8 +152,13 @@ async def process_streamed_response(agent, input_items):
                         # For JSON output, don't show duplicative information
                         pass
                     else:
-                        # Only show non-JSON results directly
-                        print(f"\n{agent_name} tool result: {item.output}")
+                        # Use last_browser_tool_call to determine if this is a result from the browser agent
+                        if last_browser_tool_call:
+                            print(f"\nBrowserAgent result: {item.output}")
+                            # Reset the flag after using it
+                            last_browser_tool_call = False
+                        else:
+                            print(f"\n{agent_name} result: {item.output}")
                 except:
                     pass
 
@@ -290,7 +303,7 @@ async def main():
         nonlocal browser_computer
         if browser_computer is None:
             # Initialize browser when needed without verbose messages
-            browser_computer = await LocalPlaywrightComputer(headless=False).__aenter__()
+            browser_computer = await LocalPlaywrightComputer(headless=False, silent=True).__aenter__()
             # Don't use atexit with asyncio.run() as it causes issues with closed event loops
             # We'll handle cleanup in the main loop exception handlers instead
         return browser_computer
@@ -336,7 +349,8 @@ async def main():
     welcome_msg = "\nParallel Supervisor Agent ready. Type your request or 'exit' to quit."
     if readline_available:
         welcome_msg += "\nUse up/down arrow keys to navigate command history."
-    print(welcome_msg)
+    # Only display the welcome message
+    print("\nSupervisor Ready.")
     
     # Add a first message to the conversation to prime the agent
     input_items.append({
@@ -456,12 +470,10 @@ The browser_agent should always prefer direct Playwright tools over ComputerTool
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
                 
-                # Run the cleanup
-                async def cleanup():
-                    await browser_computer.__aexit__(None, None, None)
-                
+                # Create and run the cleanup task
+                cleanup_task = loop.create_task(browser_computer.__aexit__(None, None, None))
                 with contextlib.suppress(Exception):
-                    loop.run_until_complete(cleanup())
+                    loop.run_until_complete(cleanup_task)
             except Exception as e:
                 print(f"Error during browser cleanup: {e}")
     

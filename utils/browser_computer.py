@@ -52,12 +52,13 @@ class LocalPlaywrightComputer(AsyncComputer):
     Creates and manages a browser instance for web interaction.
     """
 
-    def __init__(self, headless: bool = False):
+    def __init__(self, headless: bool = False, silent: bool = False):
         """Initialize the Playwright computer."""
         self._playwright: Optional[Playwright] = None
         self._browser: Optional[Browser] = None
         self._page: Optional[Page] = None
         self.headless = headless
+        self.silent = silent
 
     @property
     def environment(self) -> Environment:
@@ -83,6 +84,9 @@ class LocalPlaywrightComputer(AsyncComputer):
         
         self._page = await self._browser.new_page()
         await self._page.set_viewport_size({"width": width, "height": height})
+        
+        if not self.silent:
+            print("Browser computer initialized successfully")
         
         return self
 
@@ -167,7 +171,9 @@ class LocalPlaywrightComputer(AsyncComputer):
             
         try:
             await self._page.mouse.move(x, y)
-            await self._page.evaluate(f"window.scrollBy({scroll_x}, {scroll_y})")
+            # Use proper parameters instead of string interpolation
+            await self._page.evaluate("(scrollX, scrollY) => window.scrollBy(scrollX, scrollY)", 
+                                     scroll_x, scroll_y)
         except Exception as e:
             print(f"Error scrolling: {e}")
 
@@ -578,7 +584,18 @@ def create_browser_tools(browser_computer):
             return "Error: Browser is not initialized or no page is currently open"
         
         try:
-            # Find the iframe
+            # Try modern frame locator approach (newer Playwright versions)
+            try:
+                # Use frame locator API
+                frame_locator = bc._page.frame_locator(iframeSelector)
+                if frame_locator:
+                    await frame_locator.locator(selector).click(timeout=5000)
+                    return f"Successfully clicked element '{selector}' inside iframe '{iframeSelector}'"
+            except Exception as frame_locator_err:
+                print(f"Frame locator approach failed: {frame_locator_err}")
+                # Fall back to older approach
+            
+            # Find the iframe (legacy approach)
             iframe = await bc._page.wait_for_selector(iframeSelector, timeout=5000)
             if not iframe:
                 return f"Error: Iframe not found with selector '{iframeSelector}'"
@@ -1128,10 +1145,11 @@ def create_browser_tools(browser_computer):
             element_selectors = selectors if selectors else "button, a, input, select, textarea, [role='button']"
             
             # Get elements with their key properties
-            elements = await bc._page.evaluate(f'''
-                () => {{
-                    const elements = document.querySelectorAll("{element_selectors}");
-                    return Array.from(elements).map(el => {{
+            # Use proper parameterized evaluate to avoid string interpolation issues
+            elements = await bc._page.evaluate(
+                """(selectors) => {
+                    const elements = document.querySelectorAll(selectors);
+                    return Array.from(elements).map(el => {
                         // Get computed styles to check visibility
                         const style = window.getComputedStyle(el);
                         const isVisible = style.display !== 'none' && 
@@ -1140,38 +1158,68 @@ def create_browser_tools(browser_computer):
                         
                         // Get element position if visible
                         let rect = null;
-                        if (isVisible) {{
+                        if (isVisible) {
                             const boundingRect = el.getBoundingClientRect();
-                            if (boundingRect.width > 0 && boundingRect.height > 0) {{
-                                rect = {{
-                                    x: boundingRect.x,
-                                    y: boundingRect.y,
-                                    width: boundingRect.width,
-                                    height: boundingRect.height
-                                }};
-                            }}
-                        }}
+                            if (boundingRect && boundingRect.width > 0 && boundingRect.height > 0) {
+                                rect = {
+                                    x: boundingRect.x || 0,
+                                    y: boundingRect.y || 0,
+                                    width: boundingRect.width || 0,
+                                    height: boundingRect.height || 0
+                                };
+                            }
+                        }
                         
-                        // Return element details
-                        return {{
-                            tag: el.tagName.toLowerCase(),
-                            id: el.id || null,
-                            classes: el.className || null,
-                            type: el.type || null,
-                            name: el.name || null,
-                            value: el.value || null,
-                            text: el.textContent?.trim().substring(0, 100) || null,
+                        // Safely access element properties
+                        const getAttrSafe = (element, attr) => {
+                            try {
+                                return element[attr] || null;
+                            } catch (e) {
+                                return null;
+                            }
+                        };
+                        
+                        // Safely get text content
+                        const getTextSafe = (element) => {
+                            try {
+                                return element.textContent ? 
+                                    element.textContent.trim().substring(0, 100) : null;
+                            } catch (e) {
+                                return null;
+                            }
+                        };
+                        
+                        // Safely get attributes
+                        const getAttributesSafe = (element) => {
+                            try {
+                                if (!element.attributes) return '';
+                                return Array.from(element.attributes)
+                                    .filter(attr => attr && attr.name && !['id', 'class', 'style'].includes(attr.name))
+                                    .map(attr => `${attr.name}="${attr.value || ''}"`)
+                                    .join(' ');
+                            } catch (e) {
+                                return '';
+                            }
+                        };
+                        
+                        // Return element details with safe property access
+                        return {
+                            tag: el.tagName ? el.tagName.toLowerCase() : 'unknown',
+                            id: getAttrSafe(el, 'id'),
+                            classes: getAttrSafe(el, 'className'),
+                            type: getAttrSafe(el, 'type'),
+                            name: getAttrSafe(el, 'name'),
+                            value: getAttrSafe(el, 'value'),
+                            text: getTextSafe(el),
                             isVisible: isVisible && rect !== null,
-                            href: el.href || null,
+                            href: getAttrSafe(el, 'href'),
                             position: rect,
-                            attributes: Array.from(el.attributes)
-                                .filter(attr => !['id', 'class', 'style'].includes(attr.name))
-                                .map(attr => `${attr.name}="${attr.value}"`)
-                                .join(' ')
-                        }};
-                    }});
-                }}
-            ''')
+                            attributes: getAttributesSafe(el)
+                        };
+                    });
+                }""", 
+                element_selectors
+            )
             
             # Filter out empty or invisible elements and generate selectors
             visible_elements = [el for el in elements if el.get('isVisible', False)]
@@ -1249,7 +1297,17 @@ def create_browser_tools(browser_computer):
             
             # Get page content using content() method
             html = await bc._page.content()
-            current_url = await bc._page.url()
+            
+            # Get current URL - handle both property and method versions
+            try:
+                url_value = bc._page.url
+                if callable(url_value):
+                    current_url = await url_value()
+                else:
+                    current_url = url_value
+            except Exception as url_err:
+                print(f"Error getting URL: {url_err}")
+                current_url = "Unknown URL"
             
             # Parse with BeautifulSoup
             soup = BeautifulSoup(html, 'html.parser')
@@ -1318,6 +1376,362 @@ def create_browser_tools(browser_computer):
             print(f"Error getting text content: {type(e).__name__}: {e}")
             return f"Error getting text content: {e}"
     
+    @function_tool
+    async def playwright_get_location(api_key: Optional[str] = None,
+                               service: Optional[str] = None,
+                               include_details: Optional[bool] = None,
+                               timeout: Optional[int] = None,
+                               use_cache: Optional[bool] = None,
+                               fallback_service: Optional[str] = None,
+                               language: Optional[str] = None) -> str:
+        """
+        Get the current geolocation information with enhanced details and error handling.
+        
+        Args:
+            api_key: Optional API key for services that require authentication
+            service: Geolocation service to use ('ipinfo', 'ipapi', 'geojs', 'ipgeolocation')
+            include_details: Whether to include detailed location data (region, city, timezone, etc.)
+            timeout: Request timeout in milliseconds (default: 5000)
+            use_cache: Whether to use cached location data if available (default: True)
+            fallback_service: Secondary service to try if primary service fails
+            language: Preferred language for location names (ISO 639-1 code)
+            
+        Returns:
+            JSON string containing location information or error details
+        """
+        bc = browser_computer
+        if not bc._page:
+            return "Error: Browser is not initialized or no page is currently open"
+            
+        # Default values
+        location_service = service or "ipinfo"
+        details = include_details if include_details is not None else True
+        request_timeout = timeout or 5000
+        use_location_cache = use_cache if use_cache is not None else True
+        locale = language or "en"
+        
+        # Define cache key for this specific request
+        cache_key = f"location_cache_{location_service}_{details}_{locale}"
+        
+        # Check if we have a cached result
+        if use_location_cache:
+            try:
+                cache_result = await bc._page.evaluate(f"() => window.{cache_key}")
+                if cache_result:
+                    print(f"Using cached location data from {location_service}")
+                    return f"Location from cache ({location_service}):\n{cache_result}"
+            except Exception as cache_err:
+                print(f"Cache retrieval error: {cache_err}")
+                # Continue with fresh request
+        
+        # Define API endpoints and parameters for different services
+        service_configs = {
+            "ipinfo": {
+                "url": f"https://ipinfo.io/json{f'?token={api_key}' if api_key else ''}",
+                "extract": """
+                    response => {
+                        return {
+                            ip: response.ip,
+                            city: response.city,
+                            region: response.region,
+                            country: response.country,
+                            country_name: response.country_name || response.country,
+                            loc: response.loc,
+                            postal: response.postal,
+                            timezone: response.timezone,
+                            asn: response.org,
+                            hostname: response.hostname
+                        };
+                    }
+                """
+            },
+            "ipapi": {
+                "url": "https://ipapi.co/json/",
+                "extract": """
+                    response => {
+                        return {
+                            ip: response.ip,
+                            city: response.city,
+                            region: response.region,
+                            region_code: response.region_code,
+                            country: response.country_code,
+                            country_name: response.country_name,
+                            continent_code: response.continent_code,
+                            postal: response.postal,
+                            latitude: response.latitude,
+                            longitude: response.longitude,
+                            timezone: response.timezone,
+                            utc_offset: response.utc_offset,
+                            currency: response.currency,
+                            currency_name: response.currency_name,
+                            languages: response.languages,
+                            asn: response.asn,
+                            org: response.org
+                        };
+                    }
+                """
+            },
+            "geojs": {
+                "url": "https://get.geojs.io/v1/ip/geo.json",
+                "extract": """
+                    response => {
+                        return {
+                            ip: response.ip,
+                            country: response.country_code,
+                            country_name: response.country,
+                            region: response.region,
+                            city: response.city,
+                            latitude: response.latitude,
+                            longitude: response.longitude,
+                            timezone: response.timezone,
+                            organization: response.organization
+                        };
+                    }
+                """
+            },
+            "ipgeolocation": {
+                "url": f"https://api.ipgeolocation.io/ipgeo?apiKey={api_key or ''}&lang={locale}",
+                "extract": """
+                    response => {
+                        return {
+                            ip: response.ip,
+                            continent_code: response.continent_code,
+                            continent_name: response.continent_name,
+                            country: response.country_code2,
+                            country_name: response.country_name,
+                            region: response.state_prov,
+                            city: response.city,
+                            district: response.district,
+                            zipcode: response.zipcode,
+                            latitude: response.latitude,
+                            longitude: response.longitude,
+                            timezone: response.time_zone ? response.time_zone.name : null,
+                            timezone_offset: response.time_zone ? response.time_zone.offset : null,
+                            currency: response.currency ? response.currency.code : null,
+                            currency_name: response.currency ? response.currency.name : null,
+                            isp: response.isp,
+                            connection_type: response.connection_type,
+                            organization: response.organization
+                        };
+                    }
+                """
+            }
+        }
+        
+        # Error classes for better error handling
+        error_classes = """
+        class GeolocationError extends Error {
+            constructor(message, category, service) {
+                super(message);
+                this.name = "GeolocationError";
+                this.category = category;
+                this.service = service;
+            }
+        }
+        
+        class NetworkError extends GeolocationError {
+            constructor(message, service) {
+                super(message, "NETWORK", service);
+                this.name = "NetworkError";
+            }
+        }
+        
+        class TimeoutError extends GeolocationError {
+            constructor(message, service) {
+                super(message, "TIMEOUT", service);
+                this.name = "TimeoutError";
+            }
+        }
+        
+        class ServiceError extends GeolocationError {
+            constructor(message, service) {
+                super(message, "SERVICE", service);
+                this.name = "ServiceError";
+            }
+        }
+        
+        class ParseError extends GeolocationError {
+            constructor(message, service) {
+                super(message, "PARSE", service);
+                this.name = "ParseError";
+            }
+        }
+        """
+        
+        # Main fetch function with error handling
+        fetch_script = f"""
+        {error_classes}
+        
+        async function fetchLocation(service, config, timeout) {{
+            try {{
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), timeout);
+                
+                try {{
+                    const response = await fetch(config.url, {{ 
+                        signal: controller.signal,
+                        headers: {{ 'Accept': 'application/json' }}
+                    }});
+                    
+                    clearTimeout(timeoutId);
+                    
+                    if (!response.ok) {{
+                        throw new ServiceError(`Service returned status ${{response.status}}: ${{response.statusText}}`, service);
+                    }}
+                    
+                    const data = await response.json();
+                    const result = ({config.extract})(data);
+                    
+                    // Add metadata
+                    result.source = service;
+                    result.timestamp = new Date().toISOString();
+                    
+                    // Save to cache
+                    window.{cache_key} = JSON.stringify(result);
+                    
+                    return result;
+                }} catch (e) {{
+                    clearTimeout(timeoutId);
+                    
+                    if (e.name === 'AbortError') {{
+                        throw new TimeoutError(`Request to ${{service}} timed out after ${{timeout}}ms`, service);
+                    }} else if (e.name === 'ServiceError') {{
+                        throw e;
+                    }} else {{
+                        throw new NetworkError(`Network error fetching from ${{service}}: ${{e.message}}`, service);
+                    }}
+                }}
+            }} catch (e) {{
+                // Return a standardized error object
+                return {{
+                    error: true,
+                    service: service,
+                    errorType: e.name,
+                    errorCategory: e.category || 'UNKNOWN',
+                    message: e.message,
+                    timestamp: new Date().toISOString()
+                }};
+            }}
+        }}
+        
+        async function getLocation() {{
+            let service = '{location_service}';
+            let config = {{}};
+            
+            // Primary service configuration
+            switch(service) {{
+                case 'ipinfo':
+                    config = {service_configs['ipinfo']};
+                    break;
+                case 'ipapi':
+                    config = {service_configs['ipapi']};
+                    break;
+                case 'geojs':
+                    config = {service_configs['geojs']};
+                    break;
+                case 'ipgeolocation':
+                    config = {service_configs['ipgeolocation']};
+                    break;
+                default:
+                    config = {service_configs['ipinfo']};
+                    service = 'ipinfo';
+            }}
+            
+            // Primary request
+            const result = await fetchLocation(service, config, {request_timeout});
+            
+            // Check if we got an error
+            if (result.error) {{
+                // Try fallback service if specified
+                const fallback = '{fallback_service}';
+                if (fallback && fallback !== service) {{
+                    let fallbackConfig = {{}};
+                    
+                    switch(fallback) {{
+                        case 'ipinfo':
+                            fallbackConfig = {service_configs['ipinfo']};
+                            break;
+                        case 'ipapi':
+                            fallbackConfig = {service_configs['ipapi']};
+                            break;
+                        case 'geojs':
+                            fallbackConfig = {service_configs['geojs']};
+                            break;
+                        case 'ipgeolocation':
+                            fallbackConfig = {service_configs['ipgeolocation']};
+                            break;
+                    }}
+                    
+                    console.log(`Primary service ${{service}} failed, trying fallback ${{fallback}}`);
+                    const fallbackResult = await fetchLocation(fallback, fallbackConfig, {request_timeout});
+                    
+                    // Return fallback result (could be success or also error)
+                    if (!fallbackResult.error) {{
+                        fallbackResult.fallback = true;
+                        fallbackResult.primary_error = result;
+                    }}
+                    return fallbackResult;
+                }}
+                
+                return result;
+            }}
+            
+            return result;
+        }}
+        
+        return getLocation();
+        """
+        
+        try:
+            # Execute the script
+            print(f"Fetching location using service: {location_service}")
+            location_data = await bc._page.evaluate(fetch_script)
+            
+            # Format the response based on error state and requested detail level
+            if location_data.get('error', False):
+                error_type = location_data.get('errorType', 'Unknown')
+                error_message = location_data.get('message', 'Unknown error')
+                service_name = location_data.get('service', location_service)
+                
+                return f"Error getting location from {service_name}: {error_type} - {error_message}"
+            else:
+                # Format successful response
+                import json
+                
+                # Check if this is a fallback result
+                if location_data.get('fallback', False):
+                    primary_error = location_data.get('primary_error', {})
+                    primary_service = primary_error.get('service', location_service)
+                    primary_error_message = primary_error.get('message', 'Unknown error')
+                    
+                    fallback_notice = f"Primary service ({primary_service}) failed: {primary_error_message}. Using fallback service ({location_data.get('source')})."
+                else:
+                    fallback_notice = ""
+                
+                # Filter details if requested
+                if not details:
+                    # Basic location info
+                    basic_info = {
+                        'ip': location_data.get('ip'),
+                        'country': location_data.get('country'),
+                        'country_name': location_data.get('country_name')
+                    }
+                    
+                    response_text = json.dumps(basic_info, indent=2)
+                else:
+                    # Full details
+                    response_text = json.dumps(location_data, indent=2)
+                
+                # Add fallback notice if applicable
+                if fallback_notice:
+                    return f"{fallback_notice}\n\nLocation:\n{response_text}"
+                else:
+                    return f"Location from {location_data.get('source')}:\n{response_text}"
+                
+        except Exception as e:
+            print(f"Error executing geolocation script: {type(e).__name__}: {e}")
+            return f"Error getting location: {e}"
+
     # Return all tools as a dictionary
     return {
         "playwright_navigate": playwright_navigate,
@@ -1335,5 +1749,6 @@ def create_browser_tools(browser_computer):
         "playwright_post": playwright_post,
         "playwright_put": playwright_put,
         "playwright_patch": playwright_patch,
-        "playwright_delete": playwright_delete
+        "playwright_delete": playwright_delete,
+        "playwright_get_location": playwright_get_location
     }

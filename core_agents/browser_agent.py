@@ -47,6 +47,11 @@ def create_resilient_browser_tools(browser_tools: Dict[str, Any]) -> Dict[str, A
                 max_retries = 3
                 strategy = RetryStrategy.EXPONENTIAL_BACKOFF
                 base_delay = 2.0
+            elif "get_location" in tool_name:
+                # Location services may need multiple retries with fallbacks
+                max_retries = 3
+                strategy = RetryStrategy.EXPONENTIAL_BACKOFF
+                base_delay = 1.5
             elif any(action in tool_name for action in ["click", "fill", "select"]):
                 # Interaction tools need quick retries
                 max_retries = 2
@@ -118,14 +123,12 @@ async def create_browser_agent(browser_initializer):
     # Initialize the browser only when needed
     try:
         browser_computer = await browser_initializer()
-        print("Browser computer initialized successfully")
         
         # Get all browser tools 
         base_browser_tools = create_browser_tools(browser_computer)
         
         # Wrap tools with retry logic
         browser_tools = create_resilient_browser_tools(base_browser_tools)
-        print("Browser tools created successfully")
     except Exception as e:
         logger.error(f"Error initializing browser or creating tools: {e}")
         print(f"Error initializing browser or creating tools: {e}")
@@ -143,6 +146,7 @@ CAPABILITIES:
 - Fill out forms using the playwright_fill tool
 - Make HTTP requests directly using playwright_get, playwright_post, etc.
 - Execute JavaScript in the browser using playwright_evaluate
+- Get geolocation information using the playwright_get_location tool
 - Automatically retry failed operations with intelligent backoff strategies
 - Provide detailed error information and recovery attempts
 
@@ -222,7 +226,13 @@ DIRECT PLAYWRIGHT TOOLS:
    - playwright_post(url="https://api.example.com/submit", value='{"key": "value"}')
    - playwright_put, playwright_patch, playwright_delete
 
-12. Legacy tool (ONLY use if direct tools don't work):
+12. Geolocation tool (for getting user location):
+   - playwright_get_location()
+   - playwright_get_location(service="ipinfo", api_key="your_api_key") 
+   - playwright_get_location(include_details=True, timeout=10000)
+   - playwright_get_location(fallback_service="geojs", use_cache=True, language="en")
+
+13. Legacy tool (ONLY use if direct tools don't work):
     - ComputerTool: For computer vision-based interaction (use direct tools instead)
 
 IMPORTANT: ALWAYS use the direct Playwright tools (playwright_*) before falling back to the ComputerTool.
@@ -289,6 +299,9 @@ Always provide detailed error information to the user if an interaction fails af
             browser_tools["playwright_put"],
             browser_tools["playwright_patch"],
             browser_tools["playwright_delete"],
+            
+            # Geolocation tool
+            browser_tools["playwright_get_location"],
             
             # Legacy tools (only when direct tools don't work)
             ComputerTool(browser_computer)
