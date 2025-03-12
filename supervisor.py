@@ -216,21 +216,24 @@ async def create_browser_agent():
             browser_initialized = True
         return await browser_manager.get_computer()
     
-    # Create a custom Tool for computer with lazy initialization
-    lazy_computer_tool = Tool(
-        name="computer",
-        description="Controls a web browser to interact with websites. Captures screenshots and performs browser operations.",
-        async_call=lambda input_data: _lazy_tool_caller(input_data)
-    )
-    
-    # Helper function to handle lazy initialization
-    async def _lazy_tool_caller(input_data):
-        print("Initializing browser...")
-        async with await get_lazy_computer() as computer:
-            # Create a fresh tool with the computer
-            tool = ComputerTool(computer)
-            # Forward the call
-            return await tool(input_data)
+    # First, let's get an initial computer instance just to create the tool schema
+    async with await browser_manager.get_computer() as computer:
+        # Create a standard ComputerTool with the computer
+        template_tool = ComputerTool(computer)
+        
+        # Create a simple wrapper function for lazy initialization
+        @function_tool
+        async def lazy_computer(input_data: str) -> str:
+            """Controls a web browser to interact with websites."""
+            print("Initializing browser...")
+            async with await get_lazy_computer() as computer:
+                # Create a fresh tool with the computer
+                tool = ComputerTool(computer)
+                # Forward the call
+                return await tool(input_data)
+                
+        # Use this as our lazy tool
+        lazy_computer_tool = lazy_computer
     
     # Create the agent with the wrapped computer tool
     return Agent(
