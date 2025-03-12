@@ -181,6 +181,12 @@ class KnowledgeRepository:
         Returns:
             ID of the updated item (new version) or None if not found
         """
+        # Check if any update fields are actually provided
+        has_updates = any(param is not None for param in [title, content, tags, categories, confidence, knowledge_type])
+        if not has_updates:
+            # No changes requested, return the original ID without creating a new version
+            return item_id
+            
         async with self._lock:
             item = self.items.get(item_id)
             if item is None:
@@ -199,10 +205,12 @@ class KnowledgeRepository:
             # Add new version
             self.items[item.id] = item
             
-            # Update version history
-            if item.previous_version not in self.version_history:
-                self.version_history[item.previous_version] = []
-            self.version_history[item.previous_version].append(item.id)
+            # Update version history efficiently
+            prev_version = item.previous_version
+            if prev_version not in self.version_history:
+                self.version_history[prev_version] = [item.id]
+            else:
+                self.version_history[prev_version].append(item.id)
             
             # Save to disk if storage directory configured
             if self.storage_dir:
@@ -255,68 +263,59 @@ class KnowledgeRepository:
             List of matching knowledge items
         """
         async with self._lock:
-            # Start with all items
-            results = list(self.items.values())
+            # Apply filters in the most efficient order (most restrictive first)
             
-            # Filter by query
+            # Start with all items
+            items = self.items.values()
+            
+            # Apply type filter first (very restrictive)
+            if knowledge_type:
+                items = [item for item in items if item.knowledge_type == knowledge_type]
+                
+            # Apply confidence threshold (also restrictive)
+            if confidence_threshold > 0:
+                items = [item for item in items if item.confidence >= confidence_threshold]
+                
+            # Filter by specific tags and categories (moderately restrictive)
+            if tags:
+                items = [item for item in items if any(tag in item.tags for tag in tags)]
+                
+            if categories:
+                items = [item for item in items if any(category in item.categories for category in categories)]
+            
+            # Text search is the most expensive, do it last
             if query:
                 query = query.lower()
-                filtered = []
-                for item in results:
-                    # Check title
-                    if query in item.title.lower():
-                        filtered.append(item)
-                        continue
-                    
-                    # Check content (if it's a string)
-                    if isinstance(item.content, str) and query in item.content.lower():
-                        filtered.append(item)
-                        continue
-                    
-                    # Check tags
-                    if any(query in tag.lower() for tag in item.tags):
-                        filtered.append(item)
-                        continue
-                    
-                    # Check categories
-                    if any(query in category.lower() for category in item.categories):
-                        filtered.append(item)
-                        continue
+                results = []
                 
-                results = filtered
-            
-            # Filter by tags
-            if tags:
-                results = [
-                    item for item in results
-                    if any(tag in item.tags for tag in tags)
-                ]
-            
-            # Filter by categories
-            if categories:
-                results = [
-                    item for item in results
-                    if any(category in item.categories for category in categories)
-                ]
-            
-            # Filter by knowledge type
-            if knowledge_type:
-                results = [
-                    item for item in results
-                    if item.knowledge_type == knowledge_type
-                ]
-            
-            # Filter by confidence
-            if confidence_threshold > 0:
-                results = [
-                    item for item in results
-                    if item.confidence >= confidence_threshold
-                ]
+                for item in items:
+                    # Fast path: first check title (most likely match and fastest check)
+                    if query in item.title.lower():
+                        results.append(item)
+                        continue
+                        
+                    # Check tags (also fast)
+                    if any(query in tag.lower() for tag in item.tags):
+                        results.append(item)
+                        continue
+                        
+                    # Check categories (also fast)
+                    if any(query in category.lower() for category in item.categories):
+                        results.append(item)
+                        continue
+                    
+                    # Check content last (can be expensive for large content)
+                    if isinstance(item.content, str) and query in item.content.lower():
+                        results.append(item)
+                        continue
+            else:
+                # If no query, use all filtered items
+                results = list(items)
             
             # Sort by confidence (highest first)
             results.sort(key=lambda item: item.confidence, reverse=True)
             
-            # Limit results
+            # Limit results and return
             return results[:limit]
     
     async def get_version_history(self, item_id: str) -> List[KnowledgeItem]:

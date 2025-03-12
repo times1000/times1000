@@ -140,20 +140,35 @@ class ParallelTaskQueue:
             if not self.task_queue or self.running_tasks >= self.max_concurrent_tasks:
                 return None
             
-            # Find the highest priority task that can be executed
+            # We'll use a more efficient approach that preserves heap order
+            # First, find all executable tasks (not completed, not running, with all dependencies met)
+            executable_tasks = []
             for i, task in enumerate(self.task_queue):
                 if not task.is_completed and not task.is_running and task.can_execute:
-                    # Remove it from the queue
-                    task = self.task_queue.pop(i)
-                    heapq.heapify(self.task_queue)  # Maintain heap property
-                    
-                    # Mark as running
-                    task.is_running = True
-                    self.running_tasks += 1
-                    
-                    return task
+                    executable_tasks.append((i, task))
             
-            return None
+            if not executable_tasks:
+                return None
+                
+            # Sort executable tasks by priority (maintaining their original priority order)
+            executable_tasks.sort(key=lambda x: x[1].priority)
+            
+            # Take the highest priority task
+            idx, highest_priority_task = executable_tasks[0]
+            
+            # Remove it from the queue
+            self.task_queue[idx] = self.task_queue[-1]
+            self.task_queue.pop()
+            
+            # Only heapify if we're not removing the last element
+            if self.task_queue:
+                heapq.heapify(self.task_queue)
+            
+            # Mark as running
+            highest_priority_task.is_running = True
+            self.running_tasks += 1
+            
+            return highest_priority_task
     
     async def wait_for_all_tasks(self) -> None:
         """Wait until all tasks are completed"""
@@ -214,23 +229,44 @@ class ParallelSupervisorAgent:
     
     async def process_queue(self):
         """Process tasks from the queue"""
+        # Use background tasks to run multiple tasks concurrently
+        running_tasks = set()
+        
         while True:
-            task = await self.task_queue.get_next_executable_task()
-            if not task:
-                # No executable tasks at the moment
-                await asyncio.sleep(0.1)
-                continue
+            # First clean up any finished background tasks
+            finished_tasks = {task for task in running_tasks if task.done()}
+            running_tasks -= finished_tasks
             
+            # Get the next executable task if we have capacity
+            if len(running_tasks) < self.max_concurrent_tasks:
+                task = await self.task_queue.get_next_executable_task()
+                if task:
+                    # Create and start a background task
+                    bg_task = asyncio.create_task(self._process_task(task))
+                    running_tasks.add(bg_task)
+            
+            # Check if we're done
+            async with self.task_queue._lock:
+                if not self.task_queue.task_queue and self.task_queue.running_tasks == 0 and not running_tasks:
+                    break
+                    
+            # Avoid tight loop - sleep a short time if no tasks were found
+            if not task:
+                await asyncio.sleep(0.05)
+                
+    async def _process_task(self, task: Task):
+        """Process a single task in the background"""
+        try:
             # Execute the task
             result = await self.execute_task(task)
             
             # Mark as completed
             await self.task_queue.mark_completed(task.task_id, result)
-            
-            # Check if all tasks are done
-            async with self.task_queue._lock:
-                if not self.task_queue.task_queue and self.task_queue.running_tasks == 0:
-                    break
+        except Exception as e:
+            # If error, mark completed with error message
+            error_result = f"Error executing task: {str(e)}"
+            logger.error(f"Error executing task {task.task_id}: {str(e)}")
+            await self.task_queue.mark_completed(task.task_id, error_result)
     
     async def schedule_task(self, 
                      agent_type: str, 

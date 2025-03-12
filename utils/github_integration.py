@@ -245,7 +245,8 @@ async def suggest_code_improvement(
     suggested_changes: Dict[str, str],
     title: str,
     description: str,
-    branch_name: str = "auto-improvement"
+    branch_name: str = "auto-improvement",
+    base_branch: str = "main"
 ) -> str:
     """
     Suggest code improvements via a GitHub pull request
@@ -258,6 +259,7 @@ async def suggest_code_improvement(
         title: PR title
         description: PR description
         branch_name: Name for the new branch
+        base_branch: Base branch to create PR against (default: main)
         
     Returns:
         URL of the created pull request
@@ -265,28 +267,58 @@ async def suggest_code_improvement(
     github = GitHubClient()
     
     try:
-        # Create a new branch
-        await github.create_branch(owner, repo, branch_name)
+        # Check if GitHub token is available
+        if not github.github_token:
+            return "Error: GitHub token not available. Set GITHUB_TOKEN environment variable."
         
-        # Get the current file content
-        content, sha = await github.get_file_contents(owner, repo, file_path, ref="main")
+        # Validate input
+        if not owner or not repo:
+            return "Error: Repository owner and name are required"
         
-        # Apply suggested changes
-        for old_code, new_code in suggested_changes.items():
-            content = content.replace(old_code, new_code)
+        if not file_path:
+            return "Error: File path is required"
         
-        # Update the file in the new branch
-        commit_message = f"Improve {file_path}\n\n{title}"
-        await github.create_or_update_file(
-            owner, repo, file_path, content, commit_message, branch_name, sha
-        )
-        
-        # Create a pull request
-        pr = await github.create_pull_request(
-            owner, repo, title, description, branch_name, "main"
-        )
-        
-        return pr["html_url"]
+        if not suggested_changes:
+            return "Error: No changes provided"
+            
+        try:
+            # Create a new branch
+            logger.info(f"Creating branch {branch_name} from {base_branch}")
+            await github.create_branch(owner, repo, branch_name, source_branch=base_branch)
+            
+            # Get the current file content
+            logger.info(f"Getting content for {file_path}")
+            content, sha = await github.get_file_contents(owner, repo, file_path, ref=base_branch)
+            
+            # Apply suggested changes
+            original_content = content
+            for old_code, new_code in suggested_changes.items():
+                if old_code not in content:
+                    logger.warning(f"Could not find text '{old_code[:30]}...' in file")
+                    continue
+                content = content.replace(old_code, new_code)
+            
+            # Check if any changes were made
+            if content == original_content:
+                return "No changes could be applied - check that the suggested changes match the file content"
+            
+            # Update the file in the new branch
+            commit_message = f"Improve {file_path}\n\n{title}"
+            logger.info(f"Updating file {file_path} in branch {branch_name}")
+            await github.create_or_update_file(
+                owner, repo, file_path, content, commit_message, branch_name, sha
+            )
+            
+            # Create a pull request
+            logger.info(f"Creating PR from {branch_name} to {base_branch}")
+            pr = await github.create_pull_request(
+                owner, repo, title, description, branch_name, base_branch
+            )
+            
+            return pr["html_url"]
+        except Exception as e:
+            logger.error(f"Error in suggest_code_improvement: {str(e)}")
+            return f"Error: {str(e)}"
     finally:
         await github.close()
 

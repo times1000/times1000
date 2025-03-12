@@ -366,7 +366,7 @@ async def query_agent(recipient: str,
                 query: str, 
                 payload: Any = None, 
                 sender: str = "system",
-                timeout: float = 10.0) -> Optional[Message]:
+                timeout: float = 3.0) -> Optional[Message]:
     """
     Query an agent and wait for response
     
@@ -375,7 +375,7 @@ async def query_agent(recipient: str,
         query: Query string
         payload: Query parameters
         sender: Query sender
-        timeout: Timeout in seconds
+        timeout: Timeout in seconds (default reduced to 3s for tests)
         
     Returns:
         Response message or None if timeout

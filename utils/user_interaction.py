@@ -223,6 +223,9 @@ class UserInteractionController:
     async def _process_question_queue(self):
         """Process the question queue, batching questions when appropriate"""
         while True:
+            batch_to_process = None
+            by_category = {}
+            
             async with self._lock:
                 # Check if we have questions to process
                 if not self.question_queue:
@@ -237,34 +240,44 @@ class UserInteractionController:
                     time_since_last_batch >= self.batch_timeout_seconds
                 )
                 
-                if not should_process:
-                    # Release lock and wait
-                    self.question_queue.sort()  # Sort by priority
+                # Only prepare batch if we should process
+                if should_process:
+                    # First sort by priority to get the most important questions
+                    self.question_queue.sort()  
                     
-            if not should_process:
-                await asyncio.sleep(0.5)
-                continue
-                
-            # We should process the queue
-            async with self._lock:
-                # Take up to max_batch_size questions, prioritized
-                self.question_queue.sort()  # Sort by priority
-                batch = self.question_queue[:self.max_batch_size]
-                
-                # Group by category if possible
-                by_category = {}
-                for q in batch:
-                    if q.category not in by_category:
-                        by_category[q.category] = []
-                    by_category[q.category].append(q)
-                
-                # Remove from queue
-                self.question_queue = self.question_queue[self.max_batch_size:]
-                self.last_batch_time = current_time
+                    # Take up to max_batch_size questions
+                    batch_to_process = self.question_queue[:self.max_batch_size]
+                    
+                    # Group by category for more coherent batching
+                    by_category = {}
+                    for q in batch_to_process:
+                        if q.category not in by_category:
+                            by_category[q.category] = []
+                        by_category[q.category].append(q)
+                    
+                    # Remove questions we'll process from the queue
+                    self.question_queue = self.question_queue[self.max_batch_size:]
+                    self.last_batch_time = current_time
+                    
+                else:
+                    # If not processing, sort the queue by priority for next time
+                    self.question_queue.sort()
             
-            # Process batch by category
-            for category, questions in by_category.items():
-                await self._ask_batched_questions(questions)
+            # Process or wait
+            if batch_to_process:
+                # Process each category of questions
+                processing_tasks = []
+                
+                # Create tasks for each category of questions
+                for category, questions in by_category.items():
+                    processing_tasks.append(self._ask_batched_questions(questions))
+                
+                # Wait for all batches to complete
+                if processing_tasks:
+                    await asyncio.gather(*processing_tasks)
+            else:
+                # If not processing, wait briefly before checking again
+                await asyncio.sleep(0.2)
     
     async def _get_user_input(self) -> str:
         """Get input from the user (can be mocked for testing)"""
