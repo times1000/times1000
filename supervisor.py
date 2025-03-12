@@ -436,8 +436,8 @@ def setup_readline():
         if readline_module == "gnureadline":
             # GNU readline has consistent behavior
             readline.parse_and_bind("tab: complete")
-            readline.parse_and_bind('"\e[A": previous-history')  # Up arrow
-            readline.parse_and_bind('"\e[B": next-history')      # Down arrow
+            readline.parse_and_bind(r'"\e[A": previous-history')  # Up arrow
+            readline.parse_and_bind(r'"\e[B": next-history')      # Down arrow
         elif sys.platform == 'darwin':  # macOS with standard readline
             # macOS libedit emulation
             readline.parse_and_bind("bind ^I rl_complete")
@@ -446,8 +446,8 @@ def setup_readline():
         else:
             # Standard readline on other platforms
             readline.parse_and_bind("tab: complete")
-            readline.parse_and_bind('"\e[A": previous-history')  # Up arrow
-            readline.parse_and_bind('"\e[B": next-history')      # Down arrow
+            readline.parse_and_bind(r'"\e[A": previous-history')  # Up arrow
+            readline.parse_and_bind(r'"\e[B": next-history')      # Down arrow
         
         # Save history on exit
         atexit.register(readline.write_history_file, histfile)
