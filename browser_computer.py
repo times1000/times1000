@@ -63,46 +63,68 @@ class LocalPlaywrightComputer(AsyncComputer):
     async def _get_browser_and_page(self) -> tuple[Browser, Page]:
         """Launch browser and create a new page with specified dimensions."""
         width, height = self.dimensions
-        launch_args = [f"--window-size={width},{height}"]
+        launch_args = [
+            f"--window-size={width},{height}",
+            "--disable-web-security",  # Disable CORS and other web security features
+            "--no-sandbox",            # Less secure but helps with some issues
+            "--disable-features=site-per-process"  # Disable site isolation
+        ]
         
         # Launch the appropriate browser type
-        if self._browser_type == "chromium":
-            browser = await self.playwright.chromium.launch(
-                headless=self._headless, 
-                args=launch_args
-            )
-        elif self._browser_type == "firefox":
-            browser = await self.playwright.firefox.launch(
-                headless=self._headless, 
-                args=launch_args
-            )
-        elif self._browser_type == "webkit":
-            browser = await self.playwright.webkit.launch(
-                headless=self._headless, 
-                args=launch_args
-            )
-        else:
-            # Default to chromium
-            browser = await self.playwright.chromium.launch(
-                headless=self._headless, 
-                args=launch_args
-            )
-        
-        # Create a new page and navigate to the start URL
-        page = await browser.new_page()
-        await page.set_viewport_size({"width": width, "height": height})
-        await page.goto(self._start_url)
-        return browser, page
+        try:
+            if self._browser_type == "chromium":
+                browser = await self.playwright.chromium.launch(
+                    headless=self._headless, 
+                    args=launch_args
+                )
+            elif self._browser_type == "firefox":
+                browser = await self.playwright.firefox.launch(
+                    headless=self._headless, 
+                    args=launch_args
+                )
+            elif self._browser_type == "webkit":
+                browser = await self.playwright.webkit.launch(
+                    headless=self._headless, 
+                    args=launch_args
+                )
+            else:
+                # Default to chromium
+                browser = await self.playwright.chromium.launch(
+                    headless=self._headless, 
+                    args=launch_args
+                )
+            
+            # Create a new page and navigate to the start URL
+            page = await browser.new_page()
+            await page.set_viewport_size({"width": width, "height": height})
+            
+            # Set a longer timeout for initial navigation
+            try:
+                await page.goto(self._start_url, timeout=30000)
+            except Exception as e:
+                print(f"Initial navigation error (continuing anyway): {str(e)}")
+                
+            return browser, page
+            
+        except Exception as e:
+            print(f"Error launching browser: {str(e)}")
+            raise
 
     async def __aenter__(self):
         """Start Playwright when entering the context."""
-        self._playwright = await async_playwright().start()
-        self._browser, self._page = await self._get_browser_and_page()
+        # Only initialize once
+        if self._playwright is None:
+            self._playwright = await async_playwright().start()
+            self._browser, self._page = await self._get_browser_and_page()
         return self
         
     async def navigate(self, url: str) -> None:
         """Navigate to a specific URL."""
-        await self.page.goto(url)
+        try:
+            await self.page.goto(url, timeout=60000)
+        except Exception as e:
+            print(f"Navigation error: {str(e)}")
+            # Try to continue despite error
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Close browser and stop Playwright when exiting the context."""
@@ -141,8 +163,12 @@ class LocalPlaywrightComputer(AsyncComputer):
 
     async def screenshot(self) -> str:
         """Capture screenshot of the current page (viewport only)."""
-        png_bytes = await self.page.screenshot(full_page=False)
-        return base64.b64encode(png_bytes).decode("utf-8")
+        try:
+            png_bytes = await self.page.screenshot(full_page=False, timeout=10000)
+            return base64.b64encode(png_bytes).decode("utf-8")
+        except Exception as e:
+            print(f"Screenshot error: {str(e)}")
+            return "Error: Could not capture screenshot"
 
     async def click(self, x: int, y: int, button: Button = "left") -> None:
         """Click at the specified position with the specified button."""

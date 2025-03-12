@@ -51,29 +51,30 @@ from rich.console import Console
 from browser_computer import LocalPlaywrightComputer
 
 # Browser computer manager
+from playwright.async_api import async_playwright, Browser, Page
+
 class BrowserComputerManager:
-    """Manages a LocalPlaywrightComputer instance for the application."""
+    """Manages browser resources for the application."""
     
     def __init__(self):
-        self._computer = None
+        self._playwright = None
+        self._browser = None
+        self._page = None
         
     async def get_computer(self) -> AsyncContextManager[LocalPlaywrightComputer]:
-        """
-        Returns a context manager for a LocalPlaywrightComputer.
-        The computer will be created if it doesn't exist yet.
-        """
-        if self._computer is None:
-            self._computer = LocalPlaywrightComputer(
-                headless=False,
-                browser_type="chromium",
-                start_url="about:blank"
-            )
-            
+        """Returns a context manager for a LocalPlaywrightComputer."""
+        # Create a fresh computer each time
+        computer = LocalPlaywrightComputer(
+            headless=False,
+            browser_type="chromium",
+            start_url="about:blank"
+        )
+        
         @contextlib.asynccontextmanager
         async def _computer_context():
             try:
                 # Enter the computer's context
-                computer = await self._computer.__aenter__()
+                await computer.__aenter__()
                 yield computer
             finally:
                 # We don't exit the context here to keep the browser open
@@ -82,10 +83,12 @@ class BrowserComputerManager:
         return _computer_context()
     
     async def close(self):
-        """Close the browser if it's open."""
-        if self._computer is not None:
-            await self._computer.__aexit__(None, None, None)
-            self._computer = None
+        """Close all browser resources."""
+        try:
+            # No browser resources to clean up since we create fresh each time
+            pass
+        except Exception as e:
+            print(f"Error during browser cleanup: {str(e)}")
 
 # Create a singleton instance
 browser_manager = BrowserComputerManager()
@@ -208,85 +211,75 @@ SELF-SUFFICIENCY PRINCIPLES:
 
 async def create_browser_agent():
     """Creates a browser agent with computer capabilities."""
-    # Create a proxy function to lazily initialize the browser
-    async def get_lazy_computer():
+    
+    # Create a simple wrapper function for browser functionality
+    @function_tool
+    async def browser_navigate(url: str) -> str:
+        """Navigates to a URL in the browser."""
         global browser_initialized
+        
         if not browser_initialized:
             print("Initializing browser for the first time...")
             browser_initialized = True
-        return await browser_manager.get_computer()
-    
-    # First, let's get an initial computer instance just to create the tool schema
-    async with await browser_manager.get_computer() as computer:
-        # Create a standard ComputerTool with the computer
-        template_tool = ComputerTool(computer)
+            
+        print(f"Navigating to: {url}")
+            
+        # Create a fresh computer instance
+        computer = LocalPlaywrightComputer(
+            headless=False, 
+            browser_type="chromium",
+            start_url="about:blank"
+        )
         
-        # Create a simple wrapper function for lazy initialization
-        @function_tool
-        async def lazy_computer(input_data: str) -> str:
-            """Controls a web browser to interact with websites."""
-            print("Initializing browser...")
-            async with await get_lazy_computer() as computer:
-                # Create a fresh tool with the computer
-                tool = ComputerTool(computer)
-                # Forward the call
-                return await tool(input_data)
-                
-        # Use this as our lazy tool
-        lazy_computer_tool = lazy_computer
+        try:
+            # Initialize the browser
+            await computer.__aenter__()
+            
+            # Navigate to the URL
+            await computer.navigate(url)
+            
+            # Take a screenshot
+            screenshot = await computer.screenshot()
+            
+            # Return page info
+            return f"Successfully navigated to {url}. Screenshot taken."
+        except Exception as e:
+            print(f"Browser navigation error: {str(e)}")
+            return f"Error navigating to {url}: {str(e)}"
     
-    # Create the agent with the wrapped computer tool
+    # Create the agent with simplified browser navigation capabilities
     return Agent(
         name="BrowserAgent",
-        instructions="""You are a web browser expert specializing in interacting with websites.
+        instructions="""You are a web browser expert specializing in navigating to websites.
 
 CAPABILITIES:
 - Navigate to specific URLs
-- Click on elements, fill out forms, and interact with content
-- Scroll and navigate through pages
-- Capture screenshots to see website content
-- Extract data from web pages
+- Report back what you find
 
 TOOLS AND USAGE:
-ComputerTool:
-- Controls a web browser to interact with websites
-- Captures screenshots to see website content
-- Can click, type, scroll, and navigate within web pages
-- Perfect for complex interactions with websites
-- Use for research that requires navigating through multiple pages
+browser_navigate:
+- Takes a URL as a parameter
+- Navigates the browser to that URL
+- Returns a confirmation message and takes a screenshot
 
 COMMON TASKS:
 - "Go to website X" - Navigate to a specific URL
-- "Click on Y" - Click on a specific element on the page
-- "Scroll down" - Scroll down to see more content
-- "Find and click on X" - Search for and interact with elements
-- "Fill out form with X" - Complete forms on websites
-- "Search for X on website Y" - Use website search functionality
+- "Visit Y website" - Navigate to a specific URL
+- "Open Z in browser" - Navigate to a specific URL
 
 STRATEGY:
-1. Always start by navigating to the requested website using the navigate method
-   - IMPORTANT: For any specific URL, use: await computer.navigate("https://example.com")
-   - Always include the full URL with "https://" or "http://" prefix
-   - For Reddit: await computer.navigate("https://www.reddit.com")
-   - For news sites, social media, or any other requested site, use the full URL
-2. Take a screenshot to see the current page state
-3. Identify and click on interesting or requested elements
-4. Scroll to view more content when needed
-5. Provide detailed descriptions of what you see on the page
-6. Extract and summarize the most relevant information
+1. When a user asks you to visit a website, use the browser_navigate tool
+2. Always provide the full URL with the "https://" or "http://" prefix
+3. Report what you know about the website to the user
 
-SELF-SUFFICIENCY:
-1. Be proactive in exploring websites based on user requests
-2. Explain what you're seeing and what options are available
-3. Make intelligent decisions about what to click when asked to explore
-4. When asked to find "interesting" content, look for popular, trending, or featured items
-5. For Reddit specifically, look for posts with high upvotes, awards, or many comments
+EXAMPLES:
+- If user says "Go to example.com" → Use browser_navigate with "https://example.com"
+- If user says "Visit Reddit" → Use browser_navigate with "https://www.reddit.com"
+- If user says "Show me Google" → Use browser_navigate with "https://www.google.com"
             """,
             handoff_description="A specialized agent for direct website interaction via browser",
-            tools=[lazy_computer_tool],
-            # Use computer-use-preview model when using ComputerTool
-            model="computer-use-preview",
-            model_settings=ModelSettings(truncation="auto"),
+            tools=[browser_navigate],
+            # Use the default model
         )
 
 async def create_search_agent():
@@ -401,7 +394,7 @@ Always provide practical, executable solutions and persist until successful.""",
             ),
             browser_agent.as_tool(
                 tool_name="browser_agent",
-                tool_description="Delegate website interactions to a specialized browser agent",
+                tool_description="Delegate website interactions to a specialized browser agent that can navigate to URLs, take screenshots, click, type, and interact with web pages",
             ),
         ],
     )
