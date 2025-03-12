@@ -50,7 +50,7 @@ from rich.console import Console
 # Import our browser computer implementation
 from browser_computer import LocalPlaywrightComputer
 
-# No browser management code needed
+# No global browser variables needed - using context manager
 
 # Define custom tools
 @function_tool
@@ -167,55 +167,7 @@ SELF-SUFFICIENCY PRINCIPLES:
     tools=[run_shell_command],
 )
 
-async def create_browser_agent():
-    """Creates a browser agent with computer capabilities."""
-    # Create a computer instance using a context manager
-    computer = await LocalPlaywrightComputer().__aenter__()
-    
-    # Create the agent with ComputerTool, exactly like the example
-    return Agent(
-        name="BrowserAgent",
-        instructions="""You are a web browser expert specializing in interacting with websites.
-
-CAPABILITIES:
-- Navigate to specific URLs
-- Click on elements, fill out forms, and interact with content
-- Scroll and navigate through pages
-- Capture screenshots to see website content
-- Extract data from web pages
-
-COMMON TASKS:
-- "Go to website X" - Navigate to a specific URL
-- "Click on Y" - Click on a specific element on the page
-- "Scroll down" - Scroll down to see more content
-- "Find and click on X" - Search for and interact with elements
-- "Fill out form with X" - Complete forms on websites
-- "Search for X on website Y" - Use website search functionality
-
-STRATEGY:
-1. Always start by navigating to the requested website
-   - For any specific URL, use: await computer.navigate("https://example.com")
-   - Always include the full URL with "https://" or "http://" prefix
-   - For Reddit: await computer.navigate("https://www.reddit.com")
-   - For news sites, social media, or any other requested site, use the full URL
-2. Take a screenshot to see the current page state
-3. Identify and click on interesting or requested elements
-4. Scroll to view more content when needed
-5. Provide detailed descriptions of what you see on the page
-6. Extract and summarize the most relevant information
-
-SELF-SUFFICIENCY:
-1. Be proactive in exploring websites based on user requests
-2. Explain what you're seeing and what options are available
-3. Make intelligent decisions about what to click when asked to explore
-4. When asked to find "interesting" content, look for popular, trending, or featured items
-            """,
-            handoff_description="A specialized agent for direct website interaction via browser",
-            tools=[ComputerTool(computer)],
-            # Use computer-use-preview model when using ComputerTool
-            model="computer-use-preview",
-            model_settings=ModelSettings(truncation="auto"),
-        )
+# Browser agent is now created directly in create_supervisor_agent
 
 async def create_search_agent():
     """Creates a search agent with web search capabilities."""
@@ -258,11 +210,20 @@ browser_agent = None
 search_agent = None
 
 # Create the supervisor agent with specialized agents as tools
-async def create_supervisor_agent() -> Agent:
+async def create_supervisor_agent(browser_computer) -> Agent:
     """Creates the Supervisor agent that orchestrates specialized agents as tools."""
-    # Create specialized web agents
-    global browser_agent, search_agent
-    browser_agent = await create_browser_agent()
+    # Create specialized web agents 
+    # Create browser agent directly with the browser_computer parameter
+    browser_agent = Agent(
+        name="BrowserAgent",
+        instructions="You are a helpful agent.",
+        handoff_description="A specialized agent for direct website interaction via browser",
+        tools=[ComputerTool(browser_computer)],
+        # Use computer-use-preview model when using ComputerTool
+        model="computer-use-preview",
+        model_settings=ModelSettings(truncation="auto"),
+    )
+    
     search_agent = await create_search_agent()
     
     return Agent(
@@ -517,12 +478,12 @@ async def main():
     # Setup readline for command history
     readline_available = setup_readline()
     
-    # Browser instance is created and cleaned up by the agent itself
-    browser_computer = None
-    
-    try:
-        # Create the supervisor agent (which will also create the web agent with browser)
-        agent = await create_supervisor_agent()
+    # Following the example code pattern, initialize the browser with a context manager
+    async with LocalPlaywrightComputer() as browser_computer:
+        # The browser will be automatically closed when exiting this block
+        # Create the supervisor agent with the browser - following the example code pattern
+        agent = await create_supervisor_agent(browser_computer)
+        
         # Initialize conversation history
         input_items: List = []
     
@@ -590,7 +551,6 @@ Whenever a user mentions a specific website or browsing action, ALWAYS use brows
         
         try:
             while True:
-                
                 try:
                     # Use appropriate input method
                     user_input = safe_input("\n> ", readline_available)
@@ -613,11 +573,10 @@ Whenever a user mentions a specific website or browsing action, ALWAYS use brows
                 except Exception as e:
                     print(f"\nError processing input: {str(e)}")
                     continue
-    
         except KeyboardInterrupt:
             print("\nExiting Supervisor Agent")
-    finally:
-        # No browser cleanup needed - the browser is closed when the process exits
+        
+        # The browser will be automatically closed when the context manager exits
         print("Exiting application")
 
 # Run the supervisor agent when this file is executed
