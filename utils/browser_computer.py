@@ -1732,6 +1732,63 @@ def create_browser_tools(browser_computer):
             print(f"Error executing geolocation script: {type(e).__name__}: {e}")
             return f"Error getting location: {e}"
 
+    @function_tool
+    async def playwright_keypress(key: str, selector: Optional[str] = None) -> str:
+        """
+        Press a key or key combination on the page or in a specific element.
+        
+        Args:
+            key: Key or key combination to press (e.g., "Enter", "Control+a", "ArrowDown")
+            selector: Optional CSS selector to focus before pressing key
+            
+        Returns:
+            Message indicating success or failure
+        """
+        bc = browser_computer
+        if not bc._page:
+            return "Error: Browser is not initialized or no page is currently open"
+        
+        try:
+            # Convert common key names to Playwright format
+            normalized_key = key.lower()
+            if normalized_key in CUA_KEY_TO_PLAYWRIGHT_KEY:
+                key = CUA_KEY_TO_PLAYWRIGHT_KEY[normalized_key]
+            
+            # If a selector is provided, focus that element first
+            if selector:
+                print(f"Focusing element {selector} before pressing {key}")
+                await bc._page.focus(selector)
+            
+            # Handle key combinations (e.g., "Control+a")
+            if "+" in key:
+                key_parts = key.split("+")
+                modifiers = key_parts[:-1]
+                key_to_press = key_parts[-1]
+                
+                # Convert modifiers to Playwright format
+                playwright_modifiers = []
+                for modifier in modifiers:
+                    modifier_lower = modifier.lower()
+                    if modifier_lower in CUA_KEY_TO_PLAYWRIGHT_KEY:
+                        playwright_modifiers.append(CUA_KEY_TO_PLAYWRIGHT_KEY[modifier_lower])
+                    else:
+                        playwright_modifiers.append(modifier)
+                
+                # Convert key to Playwright format if needed
+                if key_to_press.lower() in CUA_KEY_TO_PLAYWRIGHT_KEY:
+                    key_to_press = CUA_KEY_TO_PLAYWRIGHT_KEY[key_to_press.lower()]
+                
+                print(f"Pressing key combination: modifiers={playwright_modifiers}, key={key_to_press}")
+                await bc._page.keyboard.press(key_to_press, modifiers=playwright_modifiers)
+            else:
+                print(f"Pressing key: {key}")
+                await bc._page.keyboard.press(key)
+                
+            return f"Successfully pressed {key}" + (f" on element {selector}" if selector else "")
+        except Exception as e:
+            print(f"Error pressing key {key}: {e}")
+            return f"Error pressing key {key}: {e}"
+            
     # Return all tools as a dictionary
     return {
         "playwright_navigate": playwright_navigate,
@@ -1750,5 +1807,6 @@ def create_browser_tools(browser_computer):
         "playwright_put": playwright_put,
         "playwright_patch": playwright_patch,
         "playwright_delete": playwright_delete,
-        "playwright_get_location": playwright_get_location
+        "playwright_get_location": playwright_get_location,
+        "playwright_keypress": playwright_keypress
     }
