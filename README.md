@@ -22,6 +22,9 @@ This repository contains a Supervisor Agent that orchestrates specialized agents
    ```bash
    # Make sure your virtual environment is activated
    pip install -r requirements.txt
+   
+   # Install Playwright browsers
+   python -m playwright install
    ```
 
 3. Install Claude Code CLI:
@@ -46,14 +49,23 @@ The Supervisor Agent delegates tasks to specialized agents based on their expert
 ### Running the Agent
 
 ```bash
+# Basic usage
 python supervisor.py
+
+# Run with a test to verify browser functionality
+python supervisor.py -t
+
+# Run with an initial prompt
+python supervisor.py -p "your prompt here"
 ```
 
 This will start an interactive session where you can enter requests and get responses. Command history is available using the up/down arrow keys. Press Ctrl+C to exit.
 
+The browser is lazy-loaded, meaning it only initializes when browser functionality is actually requested, improving startup performance.
+
 ## Architecture
 
-The system uses an "agents-as-tools" pattern with three specialized agents:
+The system uses an "agents-as-tools" pattern with four specialized agents:
 
 1. **CodeAgent**: Handles code writing, debugging, and explanation tasks
    - Uses Claude CLI for code generation and analysis
@@ -61,8 +73,13 @@ The system uses an "agents-as-tools" pattern with three specialized agents:
 2. **FilesystemAgent**: Manages file operations and project organization
    - Executes shell commands for file manipulation
 
-3. **WebAgent**: Performs web searches for information gathering
+3. **SearchAgent**: Performs web searches for information gathering
    - Uses WebSearchTool for online research
+
+4. **BrowserAgent**: Directly interacts with websites via browser automation
+   - Uses NavigateTool for page navigation with content extraction
+   - Provides get_page_content tool for retrieving content from current page
+   - Uses ComputerTool for advanced interactions (clicking, typing, etc.)
 
 The Supervisor coordinates these agents by:
 - Creating detailed step-by-step plans
@@ -77,6 +94,9 @@ The Supervisor coordinates these agents by:
 - Structured planning and verification workflow
 - Self-sufficiency with minimal user intervention
 - Specialized agents for different domains
+- Lazy-loaded browser automation with Playwright
+- Advanced web content extraction in multiple formats (text, HTML, markdown)
+- Browser page content retrieval without renavigation
 
 ## How to Extend
 

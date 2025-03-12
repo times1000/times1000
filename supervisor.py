@@ -4,7 +4,8 @@ supervisor.py - A supervisor agent that orchestrates specialized agents for codi
 This script implements a supervisor agent that delegates tasks to specialized agents:
 - CodeAgent: Handles code writing, debugging, and explanation
 - FilesystemAgent: Manages file operations and project organization
-- WebAgent: Performs web searches for information gathering
+- SearchAgent: Performs web searches for information gathering
+- BrowserAgent: Directly interacts with websites via browser automation
 
 The supervisor follows a structured workflow:
 1. Planning: Analyze requests and create step-by-step plans
@@ -20,7 +21,7 @@ import asyncio
 import atexit
 import contextlib
 import argparse
-from typing import Optional, List, AsyncContextManager
+from typing import Optional, List
 
 # Platform-specific readline setup
 try:
@@ -42,15 +43,13 @@ except ImportError:
 
 from agents import Agent, Runner, WebSearchTool, ItemHelpers, MessageOutputItem
 from agents import ToolCallItem, ToolCallOutputItem, function_tool, trace
-from agents import ComputerTool, ModelSettings, Tool
+from agents import ComputerTool, ModelSettings, Tool, Environment
 
 from rich.markdown import Markdown
 from rich.console import Console
 
 # Import our browser computer implementation
-from browser_computer import LocalPlaywrightComputer
-
-# No global browser variables needed - using context manager
+from browser_computer import LocalPlaywrightComputer, create_navigate_tool
 
 # Define custom tools
 @function_tool
@@ -167,7 +166,7 @@ SELF-SUFFICIENCY PRINCIPLES:
     tools=[run_shell_command],
 )
 
-# Browser agent is now created directly in create_supervisor_agent
+# Create factory functions for specialized agents
 
 async def create_search_agent():
     """Creates a search agent with web search capabilities."""
@@ -205,55 +204,113 @@ SELF-SUFFICIENCY PRINCIPLES:
         tools=[WebSearchTool()],
     )
 
-# Create placeholders for the agents
-browser_agent = None
-search_agent = None
-
-# Create the supervisor agent with specialized agents as tools
-async def create_supervisor_agent(browser_computer) -> Agent:
-    """Creates the Supervisor agent that orchestrates specialized agents as tools."""
-    # Create specialized web agents 
-    # Create browser agent directly with the browser_computer parameter
-    browser_agent = Agent(
+async def create_browser_agent(browser_initializer):
+    """Creates a browser agent with navigation and interaction capabilities."""
+    # Initialize the browser only when needed
+    browser_computer = await browser_initializer()
+    
+    return Agent(
         name="BrowserAgent",
-        instructions="You are a helpful agent.",
+        instructions="""You are a browser interaction expert specializing in website navigation and interaction.
+
+CAPABILITIES:
+- Navigate to URLs directly (using the navigate tool)
+- Take screenshots of webpages
+- Click on elements
+- Type text
+- Perform scrolling and navigation
+
+When browsing websites:
+1. ALWAYS use the navigate tool to navigate to URLs - this is a separate tool from the computer tool
+2. Take screenshots to show the user what you see
+3. Perform actions like clicking, typing, and scrolling as needed
+4. Describe what you observe on the page
+
+TOOLS AND USAGE:
+1. navigate: Dedicated tool for changing pages
+   - Use this tool FIRST when you need to go to a new URL
+   - Can optionally return page content in different formats
+   - Examples:
+     * navigate(url="https://example.com")
+     * navigate(url="https://example.com", return_content=True)
+     * navigate(url="https://example.com", return_content=True, format="html")
+     * navigate(url="https://example.com", return_content=True, format="markdown")
+
+2. get_page_content: Tool for getting content from the current page
+   - Use this when you want to get content from the current page without navigating again
+   - Returns content in various formats (text, html, markdown)
+   - Examples:
+     * get_page_content()
+     * get_page_content(format="text")
+     * get_page_content(format="html")
+     * get_page_content(format="markdown")
+   
+3. ComputerTool: For all other browser interactions
+   - Use this for clicking, typing, scrolling, etc.
+   - Take screenshots to show what you see
+   
+IMPORTANT: Always use the navigate tool when changing pages, not the computer tool.
+""",
         handoff_description="A specialized agent for direct website interaction via browser",
-        tools=[ComputerTool(browser_computer)],
+        tools=[
+            *create_navigate_tool(browser_computer),  # Unpacks navigate and get_page_content tools
+            ComputerTool(browser_computer)
+        ],
         # Use computer-use-preview model when using ComputerTool
         model="computer-use-preview",
         model_settings=ModelSettings(truncation="auto"),
     )
-    
+
+# No global agent variables needed as they're created and used within functions
+
+# Create the supervisor agent with specialized agents as tools
+async def create_supervisor_agent(browser_initializer) -> Agent:
+    """Creates the Supervisor agent that orchestrates specialized agents as tools."""
+    # Create specialized web agents
+    browser_agent = await create_browser_agent(browser_initializer)
     search_agent = await create_search_agent()
     
     return Agent(
         name="Supervisor",
-        instructions="""You are a coding assistant that delegates specialized tasks to expert agents.
+        instructions="""You are an intelligent orchestration engine that efficiently manages specialized expert agents to solve complex tasks. Your core strength is breaking down problems into optimal sub-tasks and delegating them to the most appropriate specialized agent.
 
-AVAILABLE AGENTS:
-1. CodeAgent: For coding tasks (writing, debugging, explaining code)
-   Tools: run_claude_code
+SPECIALIZED AGENTS:
+1. CodeAgent: Programming specialist
+   • Capabilities: Writing, debugging, explaining, and modifying code
+   • Tools: run_claude_code (delegates to Claude CLI)
+   • Perfect for: All programming tasks, code modifications, explanations
 
-2. FilesystemAgent: For file system operations and project organization
-   Tools: run_shell_command (for directories, file operations, system queries)
+2. FilesystemAgent: File system operations expert  
+   • Capabilities: File/directory creation, organization, and management
+   • Tools: run_shell_command (executes shell commands)
+   • Perfect for: Project structure, file operations, system queries
 
-3. SearchAgent: For searching the web for information
-   Tools: WebSearchTool (for finding information through web searches)
-   WHEN TO USE: For finding information, facts, articles, or documentation online
+3. SearchAgent: Information retrieval specialist
+   • Capabilities: Web searches, fact-finding, information gathering
+   • Tools: WebSearchTool (returns search results with links)
+   • Perfect for: Finding documentation, research, verifying facts
 
-4. BrowserAgent: For directly interacting with websites
-   Tools: ComputerTool (for browser navigation, clicking, typing, etc.)
-   WHEN TO USE: For tasks like "go to website X", "visit URL Y", or "browse website Z"
-   IMPORTANT: For ANY request to visit or interact with a specific website, use BrowserAgent
+4. BrowserAgent: Website interaction specialist
+   • Capabilities: Website navigation, clicking, typing, scrolling, screenshots
+   • Tools: NavigateTool (for URL navigation) and ComputerTool (for interactions)
+   • Perfect for: Direct website interactions, form filling, UI exploration
+   • IMPORTANT: ALWAYS use for ANY website interaction request
+   • NOTE: Always use NavigateTool first for changing pages
 
 WORKFLOW:
 1. PLANNING:
    - Analyze the request and create a step-by-step plan
    - Define success criteria and verification methods for each step
    - Assign appropriate specialized agents to each step
+   - Determine appropriate level of detail for each agent
 
 2. EXECUTION:
    - Execute steps sequentially by delegating to specialized agents
+   - IMPORTANT: Each agent requires a different level of instruction:
+     * CodeAgent: Can handle complex, high-level tasks with minimal guidance
+     * FilesystemAgent: Needs specific file paths and operations
+     * SearchAgent: Needs precise search queries with clear objectives
+     * BrowserAgent: Requires explicit step-by-step instructions with specific URLs and exact actions
    - IMPORTANT: Never implement code changes yourself - always delegate to CodeAgent
    - Clearly explain to CodeAgent what changes are needed and let it handle implementation
    - For web information gathering, use SearchAgent with WebSearchTool
@@ -478,27 +535,40 @@ async def main():
     # Setup readline for command history
     readline_available = setup_readline()
     
-    # Following the example code pattern, initialize the browser with a context manager
-    async with LocalPlaywrightComputer() as browser_computer:
-        # The browser will be automatically closed when exiting this block
-        # Create the supervisor agent with the browser - following the example code pattern
-        agent = await create_supervisor_agent(browser_computer)
-        
-        # Initialize conversation history
-        input_items: List = []
+    # Initialize browser_computer as None - it will be created only when needed (lazy loading)
+    browser_computer = None
     
-        print("\nSupervisor Agent ready. Type your request or 'exit' to quit.")
-        print("Use up/down arrow keys to navigate command history.") if readline_available else None
-        print("SearchAgent is available for web searches.")
-        print("BrowserAgent is available for direct website interactions.")
+    # Create the supervisor agent with a function to initialize the browser
+    async def init_browser():
+        nonlocal browser_computer
+        if browser_computer is None:
+            print("Browser functionality requested - initializing browser...")
+            browser_computer = await LocalPlaywrightComputer(headless=False).__aenter__()
+            # Don't use atexit with asyncio.run() as it causes issues with closed event loops
+            # We'll handle cleanup in the main loop exception handlers instead
+        return browser_computer
         
-        # Add a first message to the conversation to prime the agent
-        input_items.append({
-            "role": "system", 
-            "content": """IMPORTANT AGENT SELECTION GUIDELINES:
+    # Create the supervisor agent
+    agent = await create_supervisor_agent(init_browser)
+    
+    # Initialize conversation history
+    input_items: List = []
+
+    print("\nSupervisor Agent ready. Type your request or 'exit' to quit.")
+    print("Use up/down arrow keys to navigate command history.") if readline_available else None
+    print("SearchAgent is available for web searches.")
+    print("BrowserAgent is available for direct website interactions.")
+    
+    # Add a first message to the conversation to prime the agent
+    input_items.append({
+        "role": "system", 
+        "content": """IMPORTANT AGENT SELECTION GUIDELINES:
 
 1. For web browsing and website interaction tasks:
    - ALWAYS delegate to browser_agent
+   - The browser_agent now has dedicated tools:
+     * NavigateTool: specifically for changing pages
+     * ComputerTool: for interactions like clicking, typing, etc.
    - This includes ANY requests containing phrases like:
      * "go to website X"
      * "visit Y website"
@@ -519,69 +589,88 @@ async def main():
      * "research topic X"
 
 Whenever a user mentions a specific website or browsing action, ALWAYS use browser_agent."""
-        })
+    })
+    
+    # Handle test prompt if specified (before the main loop)
+    if args.test:
+        print("\nRunning browser agent test...")
         
-        # Handle test prompt if specified (before the main loop)
-        if args.test:
-            print("\nRunning browser agent test...")
-            
-            # First verify that the browser doesn't initialize until used
-            print("Browser should NOT be initialized yet. Check for browser window...")
-            await asyncio.sleep(2)  # Give user time to verify no browser window
-            
-            # Then test browser agent with a simple prompt
-            test_prompt = "Go to https://example.com and tell me what you see on the page"
-            print(f"\nTest prompt: {test_prompt}")
-            print("Browser SHOULD initialize soon. Watch for browser window...")
-            
-            # Run the test
-            input_items.append({"content": test_prompt, "role": "user"})
-            with trace("Test prompt processing"):
-                result = await process_streamed_response(agent, input_items)
-                input_items = result.to_input_list()
-                print("\nBrowser agent test completed.")
+        # First verify that the browser doesn't initialize until used
+        print("Browser should NOT be initialized yet (lazy loading). Check that no browser window appears...")
+        await asyncio.sleep(2)  # Give user time to verify no browser window
         
-        # Handle initial prompt if specified (before the main loop)
-        elif args.prompt:
-            print(f"\nRunning initial prompt: {args.prompt}")
-            input_items.append({"content": args.prompt, "role": "user"})
-            with trace("Initial prompt processing"):
-                result = await process_streamed_response(agent, input_items)
-                input_items = result.to_input_list()
+        # Then test browser agent with a simple prompt
+        test_prompt = "Go to https://example.com and tell me what you see on the page"
+        print(f"\nTest prompt: {test_prompt}")
+        print("Browser should initialize when needed. Watch for browser window to appear...")
         
-        try:
-            while True:
-                try:
-                    # Use appropriate input method
-                    user_input = safe_input("\n> ", readline_available)
+        # Run the test
+        input_items.append({"content": test_prompt, "role": "user"})
+        with trace("Test prompt processing"):
+            result = await process_streamed_response(agent, input_items)
+            input_items = result.to_input_list()
+            print("\nBrowser agent test completed.")
+    
+    # Handle initial prompt if specified (before the main loop)
+    elif args.prompt:
+        print(f"\nRunning initial prompt: {args.prompt}")
+        input_items.append({"content": args.prompt, "role": "user"})
+        with trace("Initial prompt processing"):
+            result = await process_streamed_response(agent, input_items)
+            input_items = result.to_input_list()
+    
+    try:
+        while True:
+            try:
+                # Use appropriate input method
+                user_input = safe_input("\n> ", readline_available)
+                
+                # Check for exit command
+                if user_input.lower() in ('exit', 'quit'):
+                    print("Exiting Supervisor Agent")
+                    break
                     
-                    # Check for exit command
-                    if user_input.lower() in ('exit', 'quit'):
-                        print("Exiting Supervisor Agent")
-                        break
-                        
-                    if user_input.strip():
-                        # Add user input to conversation history
-                        input_items.append({"content": user_input, "role": "user"})
+                if user_input.strip():
+                    # Add user input to conversation history
+                    input_items.append({"content": user_input, "role": "user"})
+
+                    # Process streamed response
+                    with trace("Task processing"):
+                        result = await process_streamed_response(agent, input_items)
+
+                        # Update input items with the result for the next iteration
+                        input_items = result.to_input_list()
+            except Exception as e:
+                print(f"\nError processing input: {str(e)}")
+                continue
+    except KeyboardInterrupt:
+        print("\nKeyboard interrupt detected. Exiting.")
+    finally:
+        # Proper cleanup of browser if it was initialized
+        if browser_computer is not None:
+            print("Closing browser...")
+            try:
+                # Create a new event loop if needed for cleanup
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_closed():
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                # Run the cleanup
+                with contextlib.suppress(Exception):
+                    loop.run_until_complete(browser_computer.__aexit__(None, None, None))
+            except Exception as e:
+                print(f"Error during browser cleanup: {e}")
     
-                        # Process streamed response
-                        with trace("Task processing"):
-                            result = await process_streamed_response(agent, input_items)
-    
-                            # Update input items with the result for the next iteration
-                            input_items = result.to_input_list()
-                except Exception as e:
-                    print(f"\nError processing input: {str(e)}")
-                    continue
-        except KeyboardInterrupt:
-            print("\nExiting Supervisor Agent")
-        
-        # The browser will be automatically closed when the context manager exits
-        print("Exiting application")
+    print("Exiting application")
 
 # Run the supervisor agent when this file is executed
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\nExiting Supervisor Agent")
+        print("\nKeyboard interrupt detected. Exiting.")

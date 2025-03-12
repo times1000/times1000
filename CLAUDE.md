@@ -53,11 +53,18 @@
 ## Web Agents Setup
 - Two separate agents for web interactions:
   1. SearchAgent: Uses WebSearchTool for finding information online
-  2. BrowserAgent: Uses ComputerTool with Playwright for direct website interaction
+  2. BrowserAgent: Uses NavigateTool, get_page_content, and ComputerTool with Playwright for direct website interaction
 - Install Playwright browsers: `python -m playwright install`
 - The BrowserAgent can perform operations like navigating, clicking, and typing
-- Direct URL navigation: BrowserAgent uses `await computer.navigate("https://example.com")`
-- The browser starts with a blank page and only initializes when first needed
+- Direct URL navigation: BrowserAgent uses the NavigateTool with:
+  - Basic: `navigate(url="https://example.com")`
+  - With content: `navigate(url="https://example.com", return_content=True)`
+  - With format: `navigate(url="https://example.com", return_content=True, format="markdown")`
+- Getting page content without renavigation:
+  - Basic: `get_page_content()`
+  - Format options: `get_page_content(format="text|html|markdown")`
+- The BrowserAgent uses ComputerTool for all other interactions (clicking, typing, screenshots)
+- The browser implements lazy loading and only initializes when browser functionality is first needed
 - The SearchAgent can perform web searches for information gathering
 
 ## Agent Selection Guidelines
