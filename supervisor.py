@@ -42,7 +42,7 @@ except ImportError:
 
 from agents import Agent, Runner, WebSearchTool, ItemHelpers, MessageOutputItem
 from agents import ToolCallItem, ToolCallOutputItem, function_tool, trace
-from agents import ComputerTool, ModelSettings
+from agents import ComputerTool, ModelSettings, Tool
 
 from rich.markdown import Markdown
 from rich.console import Console
@@ -216,26 +216,19 @@ async def create_browser_agent():
             browser_initialized = True
         return await browser_manager.get_computer()
     
-    # Get a computer instance to create the tool properly
-    async with await browser_manager.get_computer() as computer:
-        # Create the ComputerTool with proper metadata
-        computer_tool = ComputerTool(computer)
-        
-        # Create a wrapper function that preserves metadata but initializes lazily when called
-        class LazyComputerTool:
-            def __init__(self, base_tool):
-                self.base_tool = base_tool
-                # Copy attributes from the original tool
-                self.name = base_tool.name
-                self.description = base_tool.description
-                
-            async def __call__(self, input_data):
-                # Lazy initialization when actually called
-                async with await get_lazy_computer() as computer:
-                    # Create a fresh tool with the new computer
-                    actual_tool = ComputerTool(computer)
-                    # Forward the call
-                    return await actual_tool(input_data)
+    # Create a properly registered function tool for lazy browser initialization
+    @function_tool("computer")
+    async def lazy_computer_tool(input_data: str) -> str:
+        """
+        Controls a web browser to interact with websites.
+        Captures screenshots and performs browser operations.
+        """
+        print("Initializing browser...")
+        async with await get_lazy_computer() as computer:
+            # Create a fresh tool with the computer
+            tool = ComputerTool(computer)
+            # Forward the call
+            return await tool(input_data)
     
     # Create the agent with the wrapped computer tool
     return Agent(
@@ -285,7 +278,7 @@ SELF-SUFFICIENCY:
 5. For Reddit specifically, look for posts with high upvotes, awards, or many comments
             """,
             handoff_description="A specialized agent for direct website interaction via browser",
-            tools=[LazyComputerTool(computer_tool)],
+            tools=[lazy_computer_tool],
             # Use computer-use-preview model when using ComputerTool
             model="computer-use-preview",
             model_settings=ModelSettings(truncation="auto"),
