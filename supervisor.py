@@ -297,59 +297,92 @@ async def process_streamed_response(agent, input_items):
 
 # Setup command history with readline
 def setup_readline():
-    try:
-        # Create a .supervisor_data directory in user's home if it doesn't exist
-        data_dir = os.path.join(os.path.expanduser("~"), ".supervisor_data")
-        os.makedirs(data_dir, exist_ok=True)
+    """Sets up readline with command history if possible, otherwise disables it."""
+    # Skip readline setup if we're in an environment that doesn't support it well
+    if not sys.stdin.isatty():
+        print("Non-interactive terminal detected. Command history disabled.")
+        return False
         
-        # History file path within that directory
-        histfile = os.path.join(data_dir, "history")
+    try:
+        # Test if we can use readline effectively
+        readline.get_current_history_length()
+        
+        # Try to use a temporary file for history
+        import tempfile
+        with tempfile.NamedTemporaryFile(prefix="supervisor_history_", delete=False) as temp_file:
+            histfile = temp_file.name
         
         # Set history length
         readline.set_history_length(1000)
         
-        # Read history file if it exists
-        try:
-            readline.read_history_file(histfile)
-        except (FileNotFoundError, PermissionError):
-            # Create an empty file to ensure it exists with proper permissions
-            with open(histfile, 'a'):
-                pass
-        
         # Save history on exit
         atexit.register(readline.write_history_file, histfile)
         
-        # Enable arrow key navigation - using raw strings to handle escape sequences
-        readline.parse_and_bind(r'"\e[A": previous-history')  # Up arrow
-        readline.parse_and_bind(r'"\e[B": next-history')      # Down arrow
-        
-        print(f"Command history will be saved to: {histfile}")
+        # Enable arrow key navigation 
+        readline.parse_and_bind("tab: complete")
+        if sys.platform != 'win32':
+            # These bindings work on Unix-like systems - using raw strings for escape sequences
+            readline.parse_and_bind(r'"\e[A": previous-history')  # Up arrow
+            readline.parse_and_bind(r'"\e[B": next-history')      # Down arrow
+            
+        print(f"Command history enabled (temporary file)")
+        return True
     except Exception as e:
-        print(f"Warning: Unable to setup command history: {str(e)}")
+        print(f"Warning: Readline functionality limited: {str(e)}")
         print("Command history will not be available for this session.")
+        return False
 
 # Main function to run the agent loop
+def safe_input(prompt):
+    """Safely get input even if readline isn't working properly."""
+    print(prompt, end='', flush=True)
+    try:
+        line = sys.stdin.readline()
+        if not line:  # EOF
+            print("\nEOF detected. Exiting.")
+            sys.exit(0)
+        return line.rstrip('\n')
+    except KeyboardInterrupt:
+        print("\nKeyboard interrupt detected. Exiting.")
+        sys.exit(0)
+    except Exception as e:
+        print(f"\nCritical input error: {str(e)}. Exiting.")
+        sys.exit(1)
+
 async def main():
     # Setup readline for command history
-    setup_readline()
+    readline_available = setup_readline()
     
     agent = create_supervisor_agent()
     # Initialize conversation history
     input_items: List = []
 
     try:
+        print("\nSupervisor Agent ready. Type your request or 'exit' to quit.")
+        
         while True:
-            user_input = input("\n> ")
-            if user_input.strip():
-                # Add user input to conversation history
-                input_items.append({"content": user_input, "role": "user"})
+            try:
+                # Use appropriate input method
+                user_input = safe_input("\n> ")
+                
+                # Check for exit command
+                if user_input.lower() in ('exit', 'quit'):
+                    print("Exiting Supervisor Agent")
+                    break
+                    
+                if user_input.strip():
+                    # Add user input to conversation history
+                    input_items.append({"content": user_input, "role": "user"})
 
-                # Process streamed response
-                with trace("Task processing"):
-                    result = await process_streamed_response(agent, input_items)
+                    # Process streamed response
+                    with trace("Task processing"):
+                        result = await process_streamed_response(agent, input_items)
 
-                    # Update input items with the result for the next iteration
-                    input_items = result.to_input_list()
+                        # Update input items with the result for the next iteration
+                        input_items = result.to_input_list()
+            except Exception as e:
+                print(f"\nError processing input: {str(e)}")
+                continue
 
     except KeyboardInterrupt:
         print("\nExiting Supervisor Agent")
