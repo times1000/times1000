@@ -3,7 +3,7 @@ browser_agent.py - Specialized agent for direct website interaction via browser
 """
 
 from agents import Agent, ComputerTool, ModelSettings
-from browser_computer import create_navigate_tool
+from utils.browser_computer import create_navigate_tool
 
 async def create_browser_agent(browser_initializer):
     """Creates a browser agent with navigation and interaction capabilities."""

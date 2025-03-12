@@ -47,7 +47,7 @@ from rich.markdown import Markdown
 from rich.console import Console
 
 # Import our browser computer implementation
-from browser_computer import LocalPlaywrightComputer
+from utils.browser_computer import LocalPlaywrightComputer
 
 # Import the supervisor agent creator from our core_agents package
 from core_agents.supervisor import create_supervisor_agent
