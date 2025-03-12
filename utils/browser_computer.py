@@ -671,17 +671,23 @@ def create_browser_tools(browser_computer):
         try:
             # Use Playwright's API request context
             context = await bc._browser.new_context()
-            response = await context.request.get(url)
             
-            # Try to parse as JSON first
             try:
-                result = await response.json()
-                import json
-                return f"GET {url} - Status: {response.status}\nResponse:\n{json.dumps(result, indent=2)}"
-            except:
-                # Fall back to text
-                result = await response.text()
-                return f"GET {url} - Status: {response.status}\nResponse:\n{result}"
+                response = await context.request.get(url)
+                status = response.status
+                
+                # Try to parse as JSON first
+                try:
+                    result = await response.json()
+                    import json
+                    return f"GET {url} - Status: {status}\nResponse:\n{json.dumps(result, indent=2)}"
+                except:
+                    # Fall back to text
+                    result = await response.text()
+                    return f"GET {url} - Status: {status}\nResponse:\n{result}"
+            finally:
+                # Make sure to close the context
+                await context.close()
         except Exception as e:
             return f"Error executing GET request: {e}"
             
@@ -713,16 +719,22 @@ def create_browser_tools(browser_computer):
                 
             # Use Playwright's API request context
             context = await bc._browser.new_context()
-            response = await context.request.post(url, data=data)
             
-            # Try to parse as JSON first
             try:
-                result = await response.json()
-                return f"POST {url} - Status: {response.status}\nResponse:\n{json.dumps(result, indent=2)}"
-            except:
-                # Fall back to text
-                result = await response.text()
-                return f"POST {url} - Status: {response.status}\nResponse:\n{result}"
+                response = await context.request.post(url, data=data)
+                status = response.status
+                
+                # Try to parse as JSON first
+                try:
+                    result = await response.json()
+                    return f"POST {url} - Status: {status}\nResponse:\n{json.dumps(result, indent=2)}"
+                except:
+                    # Fall back to text
+                    result = await response.text()
+                    return f"POST {url} - Status: {status}\nResponse:\n{result}"
+            finally:
+                # Make sure to close the context
+                await context.close()
         except Exception as e:
             return f"Error executing POST request: {e}"
             
@@ -754,16 +766,22 @@ def create_browser_tools(browser_computer):
                 
             # Use Playwright's API request context
             context = await bc._browser.new_context()
-            response = await context.request.put(url, data=data)
             
-            # Try to parse as JSON first
             try:
-                result = await response.json()
-                return f"PUT {url} - Status: {response.status}\nResponse:\n{json.dumps(result, indent=2)}"
-            except:
-                # Fall back to text
-                result = await response.text()
-                return f"PUT {url} - Status: {response.status}\nResponse:\n{result}"
+                response = await context.request.put(url, data=data)
+                status = response.status
+                
+                # Try to parse as JSON first
+                try:
+                    result = await response.json()
+                    return f"PUT {url} - Status: {status}\nResponse:\n{json.dumps(result, indent=2)}"
+                except:
+                    # Fall back to text
+                    result = await response.text()
+                    return f"PUT {url} - Status: {status}\nResponse:\n{result}"
+            finally:
+                # Make sure to close the context
+                await context.close()
         except Exception as e:
             return f"Error executing PUT request: {e}"
             
@@ -795,16 +813,22 @@ def create_browser_tools(browser_computer):
                 
             # Use Playwright's API request context
             context = await bc._browser.new_context()
-            response = await context.request.patch(url, data=data)
             
-            # Try to parse as JSON first
             try:
-                result = await response.json()
-                return f"PATCH {url} - Status: {response.status}\nResponse:\n{json.dumps(result, indent=2)}"
-            except:
-                # Fall back to text
-                result = await response.text()
-                return f"PATCH {url} - Status: {response.status}\nResponse:\n{result}"
+                response = await context.request.patch(url, data=data)
+                status = response.status
+                
+                # Try to parse as JSON first
+                try:
+                    result = await response.json()
+                    return f"PATCH {url} - Status: {status}\nResponse:\n{json.dumps(result, indent=2)}"
+                except:
+                    # Fall back to text
+                    result = await response.text()
+                    return f"PATCH {url} - Status: {status}\nResponse:\n{result}"
+            finally:
+                # Make sure to close the context
+                await context.close()
         except Exception as e:
             return f"Error executing PATCH request: {e}"
             
@@ -826,17 +850,23 @@ def create_browser_tools(browser_computer):
         try:
             # Use Playwright's API request context
             context = await bc._browser.new_context()
-            response = await context.request.delete(url)
             
-            # Try to parse as JSON first
             try:
-                result = await response.json()
-                import json
-                return f"DELETE {url} - Status: {response.status}\nResponse:\n{json.dumps(result, indent=2)}"
-            except:
-                # Fall back to text
-                result = await response.text()
-                return f"DELETE {url} - Status: {response.status}\nResponse:\n{result}"
+                response = await context.request.delete(url)
+                status = response.status
+                
+                # Try to parse as JSON first
+                try:
+                    result = await response.json()
+                    import json
+                    return f"DELETE {url} - Status: {status}\nResponse:\n{json.dumps(result, indent=2)}"
+                except:
+                    # Fall back to text
+                    result = await response.text()
+                    return f"DELETE {url} - Status: {status}\nResponse:\n{result}"
+            finally:
+                # Make sure to close the context
+                await context.close()
         except Exception as e:
             return f"Error executing DELETE request: {e}"
     
