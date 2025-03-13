@@ -228,16 +228,16 @@ def create_resilient_browser_tools(browser_tools: Dict[str, Any]) -> Dict[str, A
 
     return resilient_tools
 
-# Function to add CAPTCHA detection and solving tool
-def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
+# Function to create CAPTCHA detection and solving tool
+def _create_captcha_tool(browser_computer):
     """
-    Adds CAPTCHA detection and solving capabilities to the browser tools
+    Creates CAPTCHA detection and solving tool bound to a specific browser instance
 
     Args:
-        browser_tools: Dictionary of browser tools
+        browser_computer: Browser computer instance to use for CAPTCHA detection
 
     Returns:
-        Dictionary of browser tools with added CAPTCHA handling
+        Function tool for CAPTCHA detection and solving
     """
     from agents.tool import function_tool
 
@@ -258,8 +258,8 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
         Returns:
             A message indicating whether a CAPTCHA was found and if it was solved
         """
-        # Get the browser computer
-        bc = browser_tools["playwright_navigate"].browser_computer
+        # Use the browser computer instance
+        bc = browser_computer
 
         # Create context if not provided
         if context_wrapper is None:
@@ -754,7 +754,7 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
 async def create_browser_agent(initial_context: Optional[BrowserSessionContext] = None, context_wrapper: Optional[Dict[str, Any]] = None):
     """
     Creates a browser agent with navigation and interaction capabilities.
-    Each agent gets its own dedicated browser instance that's only created when needed.
+    Each agent gets its own dedicated browser instance.
     
     Args:
         initial_context: Optional initial BrowserSessionContext to use
@@ -781,27 +781,26 @@ async def create_browser_agent(initial_context: Optional[BrowserSessionContext] 
         context_wrapper = {"agent_name": "BrowserAgent", "context": initial_context}
     
     try:
-        # Create a browser instance with on-demand initialization
-        from utils.browser_computer import LocalPlaywrightComputer
-        
-        # Initialize the browser directly to fix "Browser is not initialized" error
+        # Initialize the browser directly
         browser_computer = await LocalPlaywrightComputer(headless=False, silent=True).__aenter__()
+        logger.info("Created browser instance for BrowserAgent")
         
         # Store context information
         browser_computer._context = initial_context
         if context_wrapper is not None:
             browser_computer._context_wrapper = context_wrapper
-            
-        logger.info("Created browser instance for BrowserAgent")
 
-        # Get all browser tools using the real browser instance
-        base_browser_tools = create_browser_tools(browser_computer)
-
-        # Wrap tools with retry logic and context support
-        browser_tools = create_resilient_browser_tools(base_browser_tools)
-
-        # Add CAPTCHA detection and solving tools
-        browser_tools = add_captcha_tools(browser_tools)
+        # Get all browser tools using the browser instance
+        browser_tools = create_browser_tools(browser_computer)
+        
+        # Important: Store browser_computer as a member of each tool
+        for tool in browser_tools.values():
+            tool.browser_computer = browser_computer
+        
+        # Add CAPTCHA detection tool
+        captcha_tool = _create_captcha_tool(browser_computer)
+        browser_tools["detect_and_solve_captcha"] = captcha_tool
+        captcha_tool.browser_computer = browser_computer
     except Exception as e:
         logger.error(f"Error creating browser tools: {e}")
         print(f"Error creating browser tools: {e}")
