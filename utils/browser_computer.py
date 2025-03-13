@@ -251,10 +251,10 @@ def create_browser_tools(browser_computer):
             waitUntil: Navigation wait condition (load, domcontentloaded, networkidle)
             width: Viewport width in pixels
             height: Viewport height in pixels
-            format: Optional format for content - "text" (default), "html", or "markdown"
+            format: Optional format for content - "html" (default), "text", or "markdown"
         
         Returns:
-            A message indicating successful navigation with page content
+            A message indicating successful navigation along with the complete HTML of the page by default
         """
         bc = browser_computer
         if not bc._page:
@@ -272,7 +272,7 @@ def create_browser_tools(browser_computer):
         # Handle optional parameters
         nav_timeout = timeout if timeout is not None else 10000  # Default timeout to 10s
         nav_waitUntil = waitUntil if waitUntil else "load"
-        content_format = format.lower() if format else "text"
+        content_format = format.lower() if format else "html"  # Change default to html
         
         print(f"Navigation parameters: timeout={nav_timeout}, waitUntil={nav_waitUntil}, format={content_format}")
         
@@ -337,10 +337,9 @@ def create_browser_tools(browser_computer):
                 return f"Navigated to: {current_url} - {page_title}\nUnable to extract page content."
             
             # Process based on requested format
-            if content_format == "html":
-                # Return HTML content
-                preview_html = html_content[:2000] + "..." if len(html_content) > 2000 else html_content
-                return f"Successfully navigated to: {current_url} - {page_title}\n\nHTML content:\n{preview_html}"
+            if content_format == "html" or not content_format:
+                # Return full HTML content
+                return f"Successfully navigated to: {current_url} - {page_title}\n\nHTML content:\n{html_content}"
                 
             elif content_format == "markdown":
                 try:
@@ -386,7 +385,7 @@ def create_browser_tools(browser_computer):
                     print(f"Error converting to markdown: {type(md_err).__name__}: {md_err}")
                     return f"Successfully navigated to: {current_url} - {page_title}\nUnable to convert content to markdown: {md_err}"
             
-            else:  # Default to text format
+            elif content_format == "text":  # Only process as text if explicitly requested
                 # Extract page content using BeautifulSoup - this approach is more reliable than evaluate
                 try:
                     # Parse with BeautifulSoup
@@ -437,6 +436,9 @@ def create_browser_tools(browser_computer):
                 except Exception as e:
                     print(f"Error processing page content: {type(e).__name__}: {e}")
                     return f"Successfully navigated to: {current_url} - {page_title}\nUnable to extract page content details."
+            else:
+                # Default to returning HTML for any unrecognized format
+                return f"Successfully navigated to: {current_url} - {page_title}\n\nHTML content:\n{html_content}"
         except Exception as e:
             print(f"Navigation error: {type(e).__name__}: {e}")
             return f"Error navigating to {url}: {e}"
