@@ -72,24 +72,33 @@ class LocalPlaywrightComputer(AsyncComputer):
     # Context manager methods
     async def __aenter__(self):
         """Start the Playwright browser when entering the context."""
-        self._playwright = await async_playwright().start()
-        
-        # Launch browser with appropriate settings
-        width, height = self.dimensions
-        launch_args = [f"--window-size={width},{height}", "--disable-extensions"]
-        
-        self._browser = await self._playwright.chromium.launch(
-            headless=self.headless,
-            args=launch_args
-        )
-        
-        self._page = await self._browser.new_page()
-        await self._page.set_viewport_size({"width": width, "height": height})
-        
-        if not self.silent:
-            print("Browser computer initialized successfully")
-        
-        return self
+        try:
+            self._playwright = await async_playwright().start()
+            
+            # Launch browser with appropriate settings
+            width, height = self.dimensions
+            launch_args = [f"--window-size={width},{height}", "--disable-extensions"]
+            
+            self._browser = await self._playwright.chromium.launch(
+                headless=self.headless,
+                args=launch_args
+            )
+            
+            self._page = await self._browser.new_page()
+            await self._page.set_viewport_size({"width": width, "height": height})
+            
+            if not self.silent:
+                print("Browser computer initialized successfully")
+            
+            return self
+        except Exception as e:
+            print(f"Error initializing browser: {str(e)}")
+            # Clean up partial initialization
+            if hasattr(self, '_browser') and self._browser:
+                await self._browser.close()
+            if hasattr(self, '_playwright') and self._playwright:
+                await self._playwright.stop()
+            raise
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Close the browser when exiting the context."""
@@ -235,7 +244,14 @@ class LocalPlaywrightComputer(AsyncComputer):
 
 # Create tools for direct Playwright functionality
 def create_browser_tools(browser_computer):
-    """Create direct Playwright tools for the browser"""
+    """Create direct Playwright tools for the browser
+    
+    Args:
+        browser_computer: A LocalPlaywrightComputer instance to use for browser operations
+        
+    Returns:
+        Dictionary of function tools for browser interaction
+    """
     
     @function_tool
     async def playwright_navigate(url: str, timeout: Optional[int] = None, 

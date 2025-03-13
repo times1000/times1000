@@ -14,15 +14,17 @@ from datetime import datetime
 
 from agents import Agent, ComputerTool, ModelSettings
 
+# Import tools directly
+from utils.browser_computer import create_browser_tools, LocalPlaywrightComputer
+from utils import with_retry, RetryStrategy, AgentResult, ConfidenceLevel, ErrorCategory
+from utils import BrowserSessionContext, AgentContextWrapper, NavigationHistoryEntry
+
 # Custom ToolOutput class since it's not available in the agents package
 class ToolOutput:
     """Simple class to represent tool output with possible error"""
     def __init__(self, value: Any = None, error: str = None):
         self.value = value
         self.error = error
-from utils.browser_computer import create_browser_tools
-from utils import with_retry, RetryStrategy, AgentResult, ConfidenceLevel, ErrorCategory
-from utils import BrowserSessionContext, AgentContextWrapper, NavigationHistoryEntry
 
 # Configure logging
 logger = logging.getLogger("BrowserAgent")
@@ -748,58 +750,6 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
 
     return browser_tools
 
-from utils.browser_computer import LocalPlaywrightComputer
-
-# Simple implementation of a browser computer that only initializes when needed
-class LazyBrowserComputer:
-    """
-    A simplified wrapper around LocalPlaywrightComputer that initializes
-    the browser only when actually used.
-    """
-    def __init__(self, headless=False, silent=True):
-        self.headless = headless
-        self.silent = silent
-        self._computer = None
-        self._page = None
-        self._context = None
-        self._context_wrapper = None
-        
-    async def initialize(self):
-        """Initialize the browser if not already initialized"""
-        if not self._computer:
-            try:
-                self._computer = await LocalPlaywrightComputer(
-                    headless=self.headless, 
-                    silent=self.silent
-                ).__aenter__()
-                
-                # Set properties from the real computer
-                self._page = self._computer._page
-                
-                # Pass any stored context to the computer
-                if self._context:
-                    self._computer._context = self._context
-                
-                if self._context_wrapper:
-                    self._computer._context_wrapper = self._context_wrapper
-                    
-                logger.info("Created browser instance for BrowserAgent (on-demand)")
-            except Exception as e:
-                logger.error(f"Error initializing browser: {e}")
-                raise
-        return self._computer
-    
-    async def cleanup(self):
-        """Clean up browser resources"""
-        if self._computer:
-            try:
-                await self._computer.__aexit__(None, None, None)
-                self._computer = None
-                self._page = None
-                logger.info("Cleaned up BrowserAgent browser instance")
-            except Exception as e:
-                logger.error(f"Error cleaning up browser: {e}")
-                print(f"Error cleaning up browser: {e}")
 
 async def create_browser_agent(initial_context: Optional[BrowserSessionContext] = None, context_wrapper: Optional[Dict[str, Any]] = None):
     """
