@@ -5,8 +5,12 @@ with enhanced error handling and retry mechanisms
 
 import logging
 import asyncio
+import re
+import time
+import urllib.parse
 from functools import wraps
 from typing import Dict, Any, Callable, Awaitable, Optional, TypeVar, cast, Union
+from datetime import datetime
 
 from agents import Agent, ComputerTool, ModelSettings
 
@@ -18,6 +22,7 @@ class ToolOutput:
         self.error = error
 from utils.browser_computer import create_browser_tools
 from utils import with_retry, RetryStrategy, AgentResult, ConfidenceLevel, ErrorCategory
+from utils import BrowserSessionContext, AgentContextWrapper, NavigationHistoryEntry
 
 # Configure logging
 logger = logging.getLogger("BrowserAgent")
@@ -25,16 +30,16 @@ logger = logging.getLogger("BrowserAgent")
 # Type variable for return values
 T = TypeVar('T')
 
-# Create decorated versions of browser tools with retry logic
+# Create decorated versions of browser tools with retry logic and context support
 def create_resilient_browser_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Wraps browser tools with retry logic for increased resilience
+    Wraps browser tools with retry logic for increased resilience and adds context support
 
     Args:
         browser_tools: Dictionary of browser tools
 
     Returns:
-        Dictionary of wrapped browser tools with retry capabilities
+        Dictionary of wrapped browser tools with retry capabilities and context support
     """
     resilient_tools = {}
 
@@ -72,16 +77,118 @@ def create_resilient_browser_tools(browser_tools: Dict[str, Any]) -> Dict[str, A
             @wraps(original_call)
             async def resilient_call(self, *args, _original_call=original_call,
                                     _max_retries=max_retries, _strategy=strategy,
-                                    _base_delay=base_delay, **kwargs):
-                """Wrapped call function with retry logic"""
+                                    _base_delay=base_delay, _tool_name=tool_name, 
+                                    **kwargs):
+                """Wrapped call function with retry logic and context support"""
+
+                # Check if we have a context wrapper in the args
+                context_wrapper = None
+                for arg in args:
+                    if isinstance(arg, AgentContextWrapper):
+                        context_wrapper = arg
+                        break
+                
+                # If not in args, check if it's in kwargs
+                if context_wrapper is None and 'context_wrapper' in kwargs:
+                    context_wrapper = kwargs.get('context_wrapper')
+                
+                # If we still don't have a context wrapper, create a default one
+                if context_wrapper is None:
+                    browser_context = BrowserSessionContext()
+                    context_wrapper = AgentContextWrapper(agent_name="BrowserAgent", context=browser_context)
+                
+                # Check that the context is a BrowserSessionContext
+                if not isinstance(context_wrapper.context, BrowserSessionContext):
+                    # If it's not, create a new one and warn
+                    logger.warning(f"Context in wrapper is not a BrowserSessionContext. Creating a new one.")
+                    context_wrapper.context = BrowserSessionContext()
+                
+                # Add context to kwargs if not already there
+                if 'context_wrapper' not in kwargs:
+                    kwargs['context_wrapper'] = context_wrapper
+                
+                # Special handling for navigate tool to update context
+                if "navigate" in _tool_name:
+                    # Extract URL from args/kwargs
+                    url = None
+                    if len(args) > 0 and isinstance(args[0], str):
+                        url = args[0]
+                    elif 'url' in kwargs:
+                        url = kwargs.get('url')
 
                 # Define the function to retry
                 async def call_with_args():
                     try:
                         result = await _original_call(self, *args, **kwargs)
+                        
+                        # Update context based on the operation and results
+                        if context_wrapper:
+                            if "navigate" in _tool_name and url:
+                                # Extract domain for cookie storage
+                                parsed_url = urllib.parse.urlparse(url)
+                                domain = parsed_url.netloc
+
+                                # Extract success/error info from result
+                                success = True
+                                error_message = None
+                                title = None
+                                status_code = None
+                                
+                                # Parse result to extract info (this depends on the result format)
+                                if isinstance(result, str):
+                                    # Try to extract title from the result
+                                    title_match = re.search(r"Page title: ([^\n]+)", result)
+                                    if title_match:
+                                        title = title_match.group(1)
+                                    
+                                    # Check for errors in the result
+                                    if "Error" in result:
+                                        success = False
+                                        error_message = result
+                                
+                                # Update navigation history
+                                context_wrapper.context.add_navigation_entry(
+                                    url=url,
+                                    title=title,
+                                    status_code=status_code,
+                                    success=success,
+                                    error_message=error_message
+                                )
+                                
+                                # Try to extract cookies from the page and update context
+                                try:
+                                    if hasattr(self, 'browser_computer') and self.browser_computer._page:
+                                        cookies = await self.browser_computer._page.context.cookies()
+                                        if cookies:
+                                            cookie_dict = {}
+                                            for cookie in cookies:
+                                                if cookie.get('domain') and cookie.get('name'):
+                                                    cookie_domain = cookie.get('domain')
+                                                    if domain in cookie_domain or cookie_domain in domain:
+                                                        cookie_dict[cookie.get('name')] = cookie
+                                            
+                                            if cookie_dict:
+                                                context_wrapper.context.add_cookies(domain, cookie_dict)
+                                except Exception as cookie_err:
+                                    logger.warning(f"Error extracting cookies: {cookie_err}")
+                            
+                            elif "get_location" in _tool_name:
+                                # Store location data in session if successful
+                                if isinstance(result, str) and "Error" not in result:
+                                    context_wrapper.context.store_session_data("location_data", result)
+                            
                         return result
                     except Exception as e:
                         logger.warning(f"Error in browser tool: {str(e)}")
+                        
+                        # Update context with error if it's a navigation operation
+                        if context_wrapper and "navigate" in _tool_name and url:
+                            context_wrapper.context.add_navigation_entry(
+                                url=url,
+                                success=False,
+                                error_message=str(e)
+                            )
+                        
                         raise
 
                 # Apply retry logic
@@ -133,7 +240,7 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
     from agents.tool import function_tool
 
     @function_tool
-    async def detect_and_solve_captcha():
+    async def detect_and_solve_captcha(context_wrapper: Optional[AgentContextWrapper] = None):
         """
         Detects if the current page contains a CAPTCHA and attempts to solve it.
         This tool helps identify and solve common CAPTCHA types including:
@@ -143,11 +250,25 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
         - Simple image CAPTCHAs
         - Text-based CAPTCHAs
 
+        Args:
+            context_wrapper: Optional context wrapper containing browser session information
+
         Returns:
             A message indicating whether a CAPTCHA was found and if it was solved
         """
         # Get the browser computer
         bc = browser_tools["playwright_navigate"].browser_computer
+
+        # Create context if not provided
+        if context_wrapper is None:
+            browser_context = BrowserSessionContext()
+            context_wrapper = AgentContextWrapper(agent_name="BrowserAgent", context=browser_context)
+        
+        # Check that the context is a BrowserSessionContext
+        if not isinstance(context_wrapper.context, BrowserSessionContext):
+            # If it's not, create a new one and warn
+            logger.warning(f"Context in wrapper is not a BrowserSessionContext. Creating a new one.")
+            context_wrapper.context = BrowserSessionContext()
 
         if not bc._page:
             return "Error: Browser is not initialized or no page is currently open"
@@ -591,22 +712,87 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
         except Exception as e:
             print(f"Error in CAPTCHA detection: {e}")
             return f"Error while attempting to detect CAPTCHA: {e}"
+        finally:
+            # Store CAPTCHA information in the session context
+            if 'captcha_results' in locals() and context_wrapper:
+                # Make sure we're using datetime
+                from datetime import datetime
+                
+                # Store CAPTCHA results in the session
+                context_wrapper.context.store_session_data("last_captcha_check", {
+                    "timestamp": datetime.now().isoformat(),
+                    "url": bc._page.url if bc._page else None,
+                    "found": captcha_results.get('found', False),
+                    "type": captcha_results.get('type', 'unknown'),
+                    "details": captcha_results.get('details', {})
+                })
+                
+                # If the CAPTCHA was solved successfully, save this information
+                # This can be used to decide whether to retry captcha solving on future visits
+                if captcha_results.get('found', False) and not "Error" in locals():
+                    success = False
+                    # Check for success indicators based on CAPTCHA type
+                    if captcha_results.get('type') == 'reCAPTCHA' and captcha_results.get('details', {}).get('version') == 'v2-checkbox':
+                        # For checkbox type, check if we successfully verified the checkbox
+                        success = 'is_checked' in locals() and is_checked
+                    
+                    context_wrapper.context.store_session_data("captcha_solved", {
+                        "timestamp": datetime.now().isoformat(),
+                        "url": bc._page.url if bc._page else None,
+                        "type": captcha_results.get('type', 'unknown'),
+                        "success": success
+                    })
 
     # Add our CAPTCHA detection tool to the tools dict
     browser_tools["detect_and_solve_captcha"] = detect_and_solve_captcha
 
     return browser_tools
 
-async def create_browser_agent(browser_initializer):
-    """Creates a browser agent with navigation and interaction capabilities."""
+async def create_browser_agent(browser_initializer, initial_context: Optional[BrowserSessionContext] = None, context_wrapper: Optional[AgentContextWrapper] = None):
+    """
+    Creates a browser agent with navigation and interaction capabilities.
+    
+    Args:
+        browser_initializer: Function to initialize the browser
+        initial_context: Optional initial BrowserSessionContext to use
+        context_wrapper: Optional AgentContextWrapper that contains a BrowserSessionContext
+        
+    Returns:
+        Browser agent with context management capabilities
+    """
+    # Create default context if not provided
+    if initial_context is None and context_wrapper is None:
+        initial_context = BrowserSessionContext(user_id=f"user_{int(time.time())}")
+    
+    # If context_wrapper is provided, use its context if it's a BrowserSessionContext
+    if context_wrapper is not None:
+        if isinstance(context_wrapper.context, BrowserSessionContext):
+            initial_context = context_wrapper.context
+        else:
+            # Create a new BrowserSessionContext and update the wrapper
+            logger.warning(f"Context in wrapper is not a BrowserSessionContext. Creating a new one.")
+            initial_context = BrowserSessionContext(user_id=f"user_{int(time.time())}")
+            context_wrapper.context = initial_context
+    # If no context_wrapper exists but we have an initial_context, create a wrapper
+    elif initial_context is not None and context_wrapper is None:
+        context_wrapper = AgentContextWrapper(agent_name="BrowserAgent", context=initial_context)
+    
     # Initialize the browser only when needed
     try:
         browser_computer = await browser_initializer()
 
+        # Store the initial context in browser computer for potential access
+        if not hasattr(browser_computer, '_context'):
+            browser_computer._context = initial_context
+            
+        # Also store the context wrapper for easy access
+        if not hasattr(browser_computer, '_context_wrapper') and context_wrapper is not None:
+            browser_computer._context_wrapper = context_wrapper
+
         # Get all browser tools
         base_browser_tools = create_browser_tools(browser_computer)
 
-        # Wrap tools with retry logic
+        # Wrap tools with retry logic and context support
         browser_tools = create_resilient_browser_tools(base_browser_tools)
 
         # Add CAPTCHA detection and solving tools
@@ -620,11 +806,16 @@ async def create_browser_agent(browser_initializer):
     # Create a patched version of the browser agent that can handle JSON-encoded inputs
     # We'll create this by extending the Agent class
     import json
-    from functools import wraps
-    import asyncio
-    return Agent(
+    # Create the agent with context_wrapper property for state persistence
+    browser_agent = Agent(
         name="BrowserAgent",
         instructions="""You are a browser interaction expert specializing in website navigation and interaction, with enhanced error handling and recovery capabilities.
+        
+CONTEXT MANAGEMENT:
+- You can maintain state between requests using the context_wrapper parameter
+- When navigating to URLs, always pass context_wrapper to playwright_navigate
+- This allows persistent cookies and navigation history across requests
+- For CAPTCHA detection, pass context_wrapper to detect_and_solve_captcha
 
 CAPABILITIES:
 - Navigate to URLs directly using the playwright_navigate tool
@@ -847,3 +1038,9 @@ Always provide detailed error information to the user if an interaction fails af
             tool_choice="required"
         )
     )
+    
+    # Add the context wrapper as a property of the agent for state persistence
+    if context_wrapper is not None:
+        browser_agent.context_wrapper = context_wrapper
+        
+    return browser_agent

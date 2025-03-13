@@ -242,7 +242,8 @@ def create_browser_tools(browser_computer):
                            waitUntil: Optional[str] = None, 
                            width: Optional[int] = None, 
                            height: Optional[int] = None,
-                           format: Optional[str] = None) -> str:
+                           format: Optional[str] = None,
+                           context_wrapper: Optional[Any] = None) -> str:
         """
         Navigate the browser to a specific URL with configurable options.
         
@@ -253,6 +254,7 @@ def create_browser_tools(browser_computer):
             width: Viewport width in pixels
             height: Viewport height in pixels
             format: Optional format for content - "html" (default), "text", or "markdown"
+            context_wrapper: Optional context wrapper for maintaining navigation history and cookies
         
         Returns:
             A message indicating successful navigation along with cleaned HTML or other requested format
@@ -264,6 +266,11 @@ def create_browser_tools(browser_computer):
         if not url:
             return "Error: URL parameter is required"
         
+        # Check for context wrapper or get from browser_computer if available
+        if context_wrapper is None and hasattr(bc, '_context_wrapper'):
+            context_wrapper = bc._context_wrapper
+            print("Using browser computer's context wrapper")
+
         # Ensure URL has a protocol
         if not url.startswith(("http://", "https://")):
             url = "https://" + url
@@ -285,6 +292,33 @@ def create_browser_tools(browser_computer):
             except Exception as e:
                 print(f"Viewport error: {e}")
                 return f"Error setting viewport: {e}"
+                
+        # Apply any cookies from context if available
+        if context_wrapper and hasattr(context_wrapper, 'context'):
+            # Extract domain for cookie restoration
+            try:
+                from urllib.parse import urlparse
+                parsed_url = urlparse(url)
+                domain = parsed_url.netloc
+                
+                if hasattr(context_wrapper.context, 'get_cookies_for_domain'):
+                    domain_cookies = context_wrapper.context.get_cookies_for_domain(domain)
+                    if domain_cookies:
+                        print(f"Restoring {len(domain_cookies)} cookies for domain {domain}")
+                        
+                        # Convert to list format expected by Playwright
+                        cookie_list = []
+                        for cookie_data in domain_cookies.values():
+                            # Ensure we have required fields
+                            if isinstance(cookie_data, dict) and 'name' in cookie_data and 'value' in cookie_data:
+                                cookie_list.append(cookie_data)
+                            
+                        if cookie_list:
+                            await bc._page.context.add_cookies(cookie_list)
+                            print(f"Restored {len(cookie_list)} cookies")
+            except Exception as cookie_err:
+                print(f"Error restoring cookies from context: {cookie_err}")
+                # Non-fatal, continue with navigation
         
         # Navigate to the URL
         try:
