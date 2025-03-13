@@ -5,6 +5,7 @@
 - Install Playwright: `python -m playwright install`
 - Run application: `python main.py`
 - Test browser functionality: `python main.py -t`
+- Test prompt: `python main.py -p "your prompt here"`
 
 ## Development Workflow
 1. Test changes with `python main.py -t`

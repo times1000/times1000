@@ -147,7 +147,6 @@ async def process_streamed_response(agent, input_items):
                                 input_param = raw_item.parameters['input']
                                 if isinstance(input_param, str) and input_param.startswith('{') and input_param.endswith('}'):
                                     try:
-                                        import json
                                         # Try to parse as JSON 
                                         parsed_input = json.loads(input_param)
                                         # Replace with parsed object
@@ -354,17 +353,13 @@ async def main():
                         print(f"- {key}: {value}")
             return await asyncio.get_event_loop().run_in_executor(None, input, "> ")
         
-    # Create the supervisor agent
+    # Create the supervisor agent with parallel execution capabilities
     agent = await create_supervisor_agent(init_browser)
     
     # Initialize conversation history
     input_items: List = []
 
     # Display welcome message with available functionality
-    welcome_msg = "\nParallel Supervisor Agent ready. Type your request or 'exit' to quit."
-    if readline_available:
-        welcome_msg += "\nUse up/down arrow keys to navigate command history."
-    # Only display the welcome message
     print("\nSupervisor Ready.")
     
     # Add a first message to the conversation to prime the agent
@@ -462,6 +457,12 @@ The browser_agent should always prefer direct Playwright tools over ComputerTool
 
                     # Process streamed response
                     with trace("Task processing"):
+                        # Check if our agent is using the parallel implementation
+                        if hasattr(agent, 'parallel_supervisor'):
+                            # Using parallel execution
+                            print("\nUsing parallel execution...")
+                            
+                        # Process the response as usual
                         result = await process_streamed_response(agent, input_items)
 
                         # Update input items with the result for the next iteration
@@ -475,56 +476,15 @@ The browser_agent should always prefer direct Playwright tools over ComputerTool
         # Proper cleanup of browser if it was initialized
         if browser_computer is not None:
             try:
-                # Create a new event loop if needed for cleanup
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_closed():
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                
-                # Create and run the cleanup task
-                cleanup_task = loop.create_task(browser_computer.__aexit__(None, None, None))
-                with contextlib.suppress(Exception):
-                    loop.run_until_complete(cleanup_task)
+                await browser_computer.__aexit__(None, None, None)
             except Exception as e:
                 print(f"Error during browser cleanup: {e}")
     
     print("Exiting application")
 
-# Test function to verify our print statement changes
-def test_startup_messages():
-    """Test the reduced startup messages and API key check"""
-    # Test API key check
-    if not os.environ.get("OPENAI_API_KEY"):
-        print("\nTesting API key check message:")
-        check_api_keys()
-        print("\nAPI key check message displayed correctly.")
-    else:
-        print("\nOpenAI API key is set, skipping API key check test.")
-    
-    # Simulate the welcome message
-    print("\nSupervisor Agent ready. Type your request or 'exit' to quit.")
-    print("Up/down arrow keys available for command history.")
-    
-    # Mock the test messages
-    print("\nRunning browser agent test...")
-    print("Test prompt: Go to https://example.com and tell me what you see on the page")
-    print("Browser agent test completed.")
-    
-    # Show final message
-    print("\nExiting application")
-    return True
-
 # Run the supervisor agent when this file is executed
 if __name__ == "__main__":
-    # If we want to just test the UI messages
-    if len(sys.argv) > 1 and sys.argv[1] == "--test-messages":
-        test_startup_messages()
-    else:
-        try:
-            asyncio.run(main())
-        except KeyboardInterrupt:
-            print("\nKeyboard interrupt detected. Exiting.")
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nKeyboard interrupt detected. Exiting.")

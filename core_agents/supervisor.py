@@ -218,11 +218,14 @@ class ParallelSupervisorAgent:
         logger.info(f"Executing task {task.task_id} with agent {task.agent_type}")
         
         try:
-            # Here we need to call the appropriate agent's execute method
-            # This will depend on how your agents are implemented
-            # For this example, we'll assume they all have an async execute method
-            result = await agent.execute(task.prompt)
-            return result
+            # Use the agents Runner API to execute the task
+            from agents import Runner
+            # Create input with just the task prompt
+            input_items = [{"role": "user", "content": task.prompt}]
+            # Run the agent with this input
+            result = await Runner.run_async(agent, input_items)
+            # Extract the output text
+            return result.output
         except Exception as e:
             logger.error(f"Error executing task {task.task_id}: {str(e)}")
             return f"Error: {str(e)}"
@@ -299,28 +302,77 @@ class ParallelSupervisorAgent:
     
     async def execute(self, prompt: str) -> str:
         """Main execution point for the parallel supervisor"""
-        # This is a simple implementation that does not actually break down 
-        # the task into parallel tasks yet - that would require a much more
-        # complex implementation with LLM planning capabilities
+        logger.info(f"ParallelSupervisorAgent processing: {prompt[:100]}...")
         
-        # For now, we'll just use a single agent based on prompt analysis
-        agent_type = "code"
-        if "file" in prompt.lower() or "directory" in prompt.lower():
-            agent_type = "filesystem"
-        elif "search" in prompt.lower() or "find information" in prompt.lower():
-            agent_type = "search"
-        elif "navigate" in prompt.lower() or "website" in prompt.lower() or "click" in prompt.lower():
-            agent_type = "browser"
+        # Identify tasks in the prompt that can be scheduled in parallel
+        tasks_to_schedule = []
         
-        # Schedule a single task
-        task_id = await self.schedule_task(agent_type, prompt)
+        # Check for multiple agent requirements in the prompt
+        if "filesystem" in prompt.lower() and "search" in prompt.lower():
+            # Create tasks for both filesystem and search operations
+            filesystem_query = prompt
+            search_query = prompt
+            
+            # Schedule filesystem task
+            filesystem_task_id = await self.schedule_task("filesystem", filesystem_query, TaskPriority.MEDIUM)
+            tasks_to_schedule.append(filesystem_task_id)
+            
+            # Schedule search task
+            search_task_id = await self.schedule_task("search", search_query, TaskPriority.MEDIUM)
+            tasks_to_schedule.append(search_task_id)
+            
+            logger.info(f"Scheduled parallel filesystem and search tasks: {filesystem_task_id}, {search_task_id}")
+        
+        elif "code" in prompt.lower() and "browser" in prompt.lower():
+            # Create tasks for both code and browser operations
+            code_query = prompt
+            browser_query = prompt
+            
+            # Schedule code task
+            code_task_id = await self.schedule_task("code", code_query, TaskPriority.MEDIUM)
+            tasks_to_schedule.append(code_task_id)
+            
+            # Schedule browser task
+            browser_task_id = await self.schedule_task("browser", browser_query, TaskPriority.MEDIUM)
+            tasks_to_schedule.append(browser_task_id)
+            
+            logger.info(f"Scheduled parallel code and browser tasks: {code_task_id}, {browser_task_id}")
+        
+        else:
+            # For simpler requests, use a single agent based on keyword analysis
+            agent_type = "code"  # Default
+            if "file" in prompt.lower() or "directory" in prompt.lower():
+                agent_type = "filesystem"
+            elif "search" in prompt.lower() or "find information" in prompt.lower():
+                agent_type = "search"
+            elif "navigate" in prompt.lower() or "website" in prompt.lower() or "click" in prompt.lower():
+                agent_type = "browser"
+            
+            # Schedule a single task
+            task_id = await self.schedule_task(agent_type, prompt)
+            tasks_to_schedule.append(task_id)
+            logger.info(f"Scheduled single {agent_type} task: {task_id}")
         
         # Process the queue
         await self.process_queue()
         
-        # Get the result
-        result = self.task_queue.get_aggregator().get_result(task_id)
-        return result or "No result available"
+        # Get results from all scheduled tasks
+        results = []
+        for task_id in tasks_to_schedule:
+            result = self.task_queue.get_aggregator().get_result(task_id)
+            if result:
+                results.append(result)
+        
+        # Combine results if we have multiple
+        if len(results) > 1:
+            combined_result = "Results from parallel execution:\n\n"
+            for i, result in enumerate(results, 1):
+                combined_result += f"--- Result {i} ---\n{result}\n\n"
+            return combined_result
+        elif len(results) == 1:
+            return results[0]
+        else:
+            return "No results available from task execution."
     
     def as_agent(self) -> Agent:
         """Convert to a standard Agent for compatibility"""
@@ -387,9 +439,7 @@ async def create_supervisor_agent(browser_initializer) -> Agent:
     browser_agent = await create_browser_agent(browser_initializer)
     search_agent = await create_search_agent()
     
-    # Let's go back to the original approach without a wrapper
-    
-    # Create the parallel supervisor
+    # Create the parallel supervisor with actual execution capabilities
     parallel_supervisor = ParallelSupervisorAgent(
         code_agent=code_agent,
         filesystem_agent=filesystem_agent,
@@ -398,9 +448,8 @@ async def create_supervisor_agent(browser_initializer) -> Agent:
         max_concurrent_tasks=3
     )
     
-    # For now, we'll return a standard agent wrapper around our parallel supervisor
-    # This is for compatibility with the existing system
-    return Agent(
+    # Create an agent wrapper that will delegate to our parallel supervisor
+    agent = Agent(
         name="ParallelSupervisor",
         instructions="""You are an advanced orchestration engine that efficiently manages specialized expert agents to solve complex tasks. Your core strength is breaking down problems into optimal sub-tasks and delegating them to the most appropriate specialized agent.
 
@@ -486,3 +535,41 @@ Always provide practical, executable solutions and persist until successful.""",
             ),
         ],
     )
+    
+    # Replace the standard agent with a wrapped version that uses our parallel execution
+    # We can't directly modify the agent's execute method as it doesn't expose it
+    # Instead, we'll create a wrapper class that delegates to our parallel supervisor
+    
+    class ParallelExecutionWrapper:
+        def __init__(self, agent, parallel_supervisor):
+            self.agent = agent
+            self.parallel_supervisor = parallel_supervisor
+            self.name = agent.name
+            # Add additional attributes from the Agent class to maintain compatibility
+            for attr in dir(agent):
+                if not attr.startswith('_') and attr not in ['execute', 'as_tool']:
+                    try:
+                        setattr(self, attr, getattr(agent, attr))
+                    except (AttributeError, TypeError):
+                        pass
+            
+        async def execute(self, prompt):
+            """Execute with parallel capabilities when possible"""
+            try:
+                logger.info(f"Using parallel execution for: {prompt[:100]}...")
+                return await self.parallel_supervisor.execute(prompt)
+            except Exception as e:
+                logger.error(f"Parallel execution failed: {str(e)}. Falling back to standard execution.")
+                # Use the standard agent via the Runner API since we can't access execute directly
+                from agents import Runner
+                result = await Runner.run_async(self.agent, [{"role": "user", "content": prompt}])
+                return result.output
+                
+        def as_tool(self, *args, **kwargs):
+            """Passthrough to maintain API compatibility"""
+            return self.agent.as_tool(*args, **kwargs)
+    
+    # Create the wrapped agent
+    wrapped_agent = ParallelExecutionWrapper(agent, parallel_supervisor)
+    
+    return wrapped_agent

@@ -92,10 +92,18 @@ class LocalPlaywrightComputer(AsyncComputer):
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Close the browser when exiting the context."""
-        if self._browser:
-            await self._browser.close()
-        if self._playwright:
-            await self._playwright.stop()
+        try:
+            if self._browser:
+                await self._browser.close()
+                self._browser = None
+            if self._playwright:
+                await self._playwright.stop()
+                self._playwright = None
+            self._page = None
+            if not self.silent:
+                print("Browser computer closed successfully")
+        except Exception as e:
+            print(f"Error during browser cleanup: {e}")
 
     # Required browser navigation methods (names must match what ComputerTool expects)
     async def goto(self, url: str) -> None:
@@ -815,6 +823,70 @@ def create_browser_tools(browser_computer):
         except Exception as e:
             return f"Error closing browser: {e}"
             
+    # HTTP request helper function
+    async def _make_http_request(browser_computer, method: str, url: str, data: Any = None) -> str:
+        """
+        Helper function to make HTTP requests with consistent error handling.
+        
+        Args:
+            method: HTTP method (GET, POST, PUT, PATCH, DELETE)
+            url: URL to make the request to
+            data: Optional data for request body
+            
+        Returns:
+            Formatted response from the server
+        """
+        if not browser_computer._page:
+            return "Error: Browser is not initialized or no page is currently open"
+            
+        try:
+            # Use Playwright's API request context
+            context = await browser_computer._browser.new_context()
+            
+            try:
+                # Execute the right HTTP method
+                request_method = getattr(context.request, method.lower())
+                
+                # Call with or without data parameter as appropriate
+                if method in ['POST', 'PUT', 'PATCH'] and data is not None:
+                    response = await request_method(url, data=data)
+                else:
+                    response = await request_method(url)
+                
+                # Handle both property and method versions of status
+                status = response.status
+                if callable(status):
+                    status = await status()
+                
+                # Try to parse as JSON first
+                try:
+                    # Handle both property and method versions of json
+                    json_method = response.json
+                    if callable(json_method):
+                        result = await json_method()
+                    else:
+                        # If it's a property, assume it's already the result
+                        result = json_method
+                    
+                    import json
+                    return f"{method} {url} - Status: {status}\nResponse:\n{json.dumps(result, indent=2)}"
+                except:
+                    # Fall back to text
+                    # Handle both property and method versions of text
+                    text_method = response.text
+                    if callable(text_method):
+                        result = await text_method()
+                    else:
+                        # If it's a property, assume it's already the result
+                        result = text_method
+                        
+                    return f"{method} {url} - Status: {status}\nResponse:\n{result}"
+            finally:
+                # Make sure to close the context
+                await context.close()
+        except Exception as e:
+            return f"Error executing {method} request: {e}"
+    
     # HTTP API tools
     @function_tool
     async def playwright_get(url: str) -> str:
@@ -827,50 +899,20 @@ def create_browser_tools(browser_computer):
         Returns:
             Response from the server
         """
-        bc = browser_computer
-        if not bc._page:
-            return "Error: Browser is not initialized or no page is currently open"
+        return await _make_http_request(browser_computer, "GET", url)
             
+    # Helper function to parse JSON data for HTTP requests
+    def _parse_json_data(value: str) -> Any:
+        """Parse JSON string if possible, otherwise return as is"""
+        data = value
         try:
-            # Use Playwright's API request context
-            context = await bc._browser.new_context()
-            
-            try:
-                response = await context.request.get(url)
-                # Handle both property and method versions of status
-                status = response.status
-                if callable(status):
-                    status = await status()
-                
-                # Try to parse as JSON first
-                try:
-                    # Handle both property and method versions of json
-                    json_method = response.json
-                    if callable(json_method):
-                        result = await json_method()
-                    else:
-                        # If it's a property, assume it's already the result
-                        result = json_method
-                        
-                    import json
-                    return f"GET {url} - Status: {status}\nResponse:\n{json.dumps(result, indent=2)}"
-                except:
-                    # Fall back to text
-                    # Handle both property and method versions of text
-                    text_method = response.text
-                    if callable(text_method):
-                        result = await text_method()
-                    else:
-                        # If it's a property, assume it's already the result
-                        result = text_method
-                        
-                    return f"GET {url} - Status: {status}\nResponse:\n{result}"
-            finally:
-                # Make sure to close the context
-                await context.close()
-        except Exception as e:
-            return f"Error executing GET request: {e}"
-            
+            import json
+            data = json.loads(value)
+        except:
+            # If not JSON, use as raw string
+            pass
+        return data
+        
     @function_tool
     async def playwright_post(url: str, value: str) -> str:
         """
@@ -883,58 +925,8 @@ def create_browser_tools(browser_computer):
         Returns:
             Response from the server
         """
-        bc = browser_computer
-        if not bc._page:
-            return "Error: Browser is not initialized or no page is currently open"
-            
-        try:
-            # Try to parse the value as JSON
-            data = value
-            try:
-                import json
-                data = json.loads(value)
-            except:
-                # If not JSON, use as raw string
-                pass
-                
-            # Use Playwright's API request context
-            context = await bc._browser.new_context()
-            
-            try:
-                response = await context.request.post(url, data=data)
-                # Handle both property and method versions of status
-                status = response.status
-                if callable(status):
-                    status = await status()
-                
-                # Try to parse as JSON first
-                try:
-                    # Handle both property and method versions of json
-                    json_method = response.json
-                    if callable(json_method):
-                        result = await json_method()
-                    else:
-                        # If it's a property, assume it's already the result
-                        result = json_method
-                        
-                    import json
-                    return f"POST {url} - Status: {status}\nResponse:\n{json.dumps(result, indent=2)}"
-                except:
-                    # Fall back to text
-                    # Handle both property and method versions of text
-                    text_method = response.text
-                    if callable(text_method):
-                        result = await text_method()
-                    else:
-                        # If it's a property, assume it's already the result
-                        result = text_method
-                        
-                    return f"POST {url} - Status: {status}\nResponse:\n{result}"
-            finally:
-                # Make sure to close the context
-                await context.close()
-        except Exception as e:
-            return f"Error executing POST request: {e}"
+        data = _parse_json_data(value)
+        return await _make_http_request(browser_computer, "POST", url, data)
             
     @function_tool
     async def playwright_put(url: str, value: str) -> str:
@@ -948,58 +940,8 @@ def create_browser_tools(browser_computer):
         Returns:
             Response from the server
         """
-        bc = browser_computer
-        if not bc._page:
-            return "Error: Browser is not initialized or no page is currently open"
-            
-        try:
-            # Try to parse the value as JSON
-            data = value
-            try:
-                import json
-                data = json.loads(value)
-            except:
-                # If not JSON, use as raw string
-                pass
-                
-            # Use Playwright's API request context
-            context = await bc._browser.new_context()
-            
-            try:
-                response = await context.request.put(url, data=data)
-                # Handle both property and method versions of status
-                status = response.status
-                if callable(status):
-                    status = await status()
-                
-                # Try to parse as JSON first
-                try:
-                    # Handle both property and method versions of json
-                    json_method = response.json
-                    if callable(json_method):
-                        result = await json_method()
-                    else:
-                        # If it's a property, assume it's already the result
-                        result = json_method
-                        
-                    import json
-                    return f"PUT {url} - Status: {status}\nResponse:\n{json.dumps(result, indent=2)}"
-                except:
-                    # Fall back to text
-                    # Handle both property and method versions of text
-                    text_method = response.text
-                    if callable(text_method):
-                        result = await text_method()
-                    else:
-                        # If it's a property, assume it's already the result
-                        result = text_method
-                        
-                    return f"PUT {url} - Status: {status}\nResponse:\n{result}"
-            finally:
-                # Make sure to close the context
-                await context.close()
-        except Exception as e:
-            return f"Error executing PUT request: {e}"
+        data = _parse_json_data(value)
+        return await _make_http_request(browser_computer, "PUT", url, data)
             
     @function_tool
     async def playwright_patch(url: str, value: str) -> str:
@@ -1013,58 +955,8 @@ def create_browser_tools(browser_computer):
         Returns:
             Response from the server
         """
-        bc = browser_computer
-        if not bc._page:
-            return "Error: Browser is not initialized or no page is currently open"
-            
-        try:
-            # Try to parse the value as JSON
-            data = value
-            try:
-                import json
-                data = json.loads(value)
-            except:
-                # If not JSON, use as raw string
-                pass
-                
-            # Use Playwright's API request context
-            context = await bc._browser.new_context()
-            
-            try:
-                response = await context.request.patch(url, data=data)
-                # Handle both property and method versions of status
-                status = response.status
-                if callable(status):
-                    status = await status()
-                
-                # Try to parse as JSON first
-                try:
-                    # Handle both property and method versions of json
-                    json_method = response.json
-                    if callable(json_method):
-                        result = await json_method()
-                    else:
-                        # If it's a property, assume it's already the result
-                        result = json_method
-                        
-                    import json
-                    return f"PATCH {url} - Status: {status}\nResponse:\n{json.dumps(result, indent=2)}"
-                except:
-                    # Fall back to text
-                    # Handle both property and method versions of text
-                    text_method = response.text
-                    if callable(text_method):
-                        result = await text_method()
-                    else:
-                        # If it's a property, assume it's already the result
-                        result = text_method
-                        
-                    return f"PATCH {url} - Status: {status}\nResponse:\n{result}"
-            finally:
-                # Make sure to close the context
-                await context.close()
-        except Exception as e:
-            return f"Error executing PATCH request: {e}"
+        data = _parse_json_data(value)
+        return await _make_http_request(browser_computer, "PATCH", url, data)
             
     @function_tool
     async def playwright_delete(url: str) -> str:
@@ -1077,49 +969,7 @@ def create_browser_tools(browser_computer):
         Returns:
             Response from the server
         """
-        bc = browser_computer
-        if not bc._page:
-            return "Error: Browser is not initialized or no page is currently open"
-            
-        try:
-            # Use Playwright's API request context
-            context = await bc._browser.new_context()
-            
-            try:
-                response = await context.request.delete(url)
-                # Handle both property and method versions of status
-                status = response.status
-                if callable(status):
-                    status = await status()
-                
-                # Try to parse as JSON first
-                try:
-                    # Handle both property and method versions of json
-                    json_method = response.json
-                    if callable(json_method):
-                        result = await json_method()
-                    else:
-                        # If it's a property, assume it's already the result
-                        result = json_method
-                        
-                    import json
-                    return f"DELETE {url} - Status: {status}\nResponse:\n{json.dumps(result, indent=2)}"
-                except:
-                    # Fall back to text
-                    # Handle both property and method versions of text
-                    text_method = response.text
-                    if callable(text_method):
-                        result = await text_method()
-                    else:
-                        # If it's a property, assume it's already the result
-                        result = text_method
-                        
-                    return f"DELETE {url} - Status: {status}\nResponse:\n{result}"
-            finally:
-                # Make sure to close the context
-                await context.close()
-        except Exception as e:
-            return f"Error executing DELETE request: {e}"
+        return await _make_http_request(browser_computer, "DELETE", url)
     
     # No legacy navigate function - functionality merged into playwright_navigate
     
