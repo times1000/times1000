@@ -20,8 +20,12 @@ import asyncio
 import atexit
 import contextlib
 import argparse
+import logging
 from typing import List, Dict, Any, Optional
 import textwrap
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 # Try to load .env file if available
 try:
@@ -50,7 +54,7 @@ except ImportError:
     readline_module = None
 
 from agents import Agent, Runner, ItemHelpers, MessageOutputItem
-from agents import ToolCallItem, ToolCallOutputItem, trace
+from agents import ToolCallItem, ToolCallOutputItem, handoff, trace
 
 from rich.markdown import Markdown
 from rich.console import Console
@@ -93,7 +97,8 @@ async def process_streamed_response(agent, input_items):
     console = Console()
     
     # Track the last tool call to identify which agent a result belongs to
-    last_browser_tool_call = False
+    last_tool_call = None
+    current_agent = "Supervisor"
     
     # Create a streamed result
     result = Runner.run_streamed(agent, input_items)
@@ -104,9 +109,15 @@ async def process_streamed_response(agent, input_items):
         if event.type == "raw_response_event":
             continue
 
-        # Handle agent updates
+        # Handle agent updates (handoffs and tool calls)
         elif event.type == "agent_updated_stream_event":
-            print(f"\nAgent: {event.new_agent.name}")
+            current_agent = event.new_agent.name
+            # Check if this is a handoff
+            is_handoff = hasattr(event, 'handoff') and event.handoff
+            if is_handoff:
+                print(f"\nHandoff to: {current_agent}")
+            else:
+                print(f"\nAgent: {current_agent}")
 
         # Handle run item stream events (most content comes through here)
         elif event.type == "run_item_stream_event":
@@ -116,7 +127,40 @@ async def process_streamed_response(agent, input_items):
             # Handle different item types
             if item.type == "message_output_item":
                 message_text = ItemHelpers.text_message_output(item)
+                
+                # Check if this message might be browser instructions that should have been a tool call
+                browser_instruction_keywords = [
+                    "navigate to", "go to", "visit", "open browser", "click on", 
+                    "type in", "fill", "select", "submit", "login page", "enter", 
+                    "browse to", "search for", "check the website", "look at the website",
+                    "switch to tab", "press the button", "find the element", "scroll", 
+                    "take a screenshot", "download", "upload", "log in", "sign in",
+                    "create account", "add to cart", "checkout", "find information",
+                    "locate the", "look for", "explore", "interact with"
+                ]
+                
+                # Flag potential browser instructions that should be tool calls
+                potential_browser_instruction = False
+                if agent_name == "Supervisor" or agent_name == "Worker":
+                    for keyword in browser_instruction_keywords:
+                        if keyword in message_text.lower():
+                            potential_browser_instruction = True
+                            break
+                
                 print(f"\n{agent_name}:")
+                
+                # Add warning if this appears to be a browser instruction that should be a tool call
+                if potential_browser_instruction:
+                    if agent_name == "Supervisor":
+                        warning = "The supervisor should NEVER give browser instructions directly to the user."
+                        warning += "\nInstead, it should use the worker_agent tool which in turn uses browser_agent."
+                    else:  # Worker
+                        warning = "The worker should NEVER give browser instructions directly to the user."
+                        warning += "\nInstead, it should use the browser_agent tool for ALL web interactions."
+                        
+                    print("\n⚠️ CRITICAL WARNING: This message appears to contain browser instructions that should be delegated to the appropriate agent tool.")
+                    print(warning)
+                
                 try:
                     console.print(Markdown(message_text))
                 except Exception:
@@ -128,9 +172,12 @@ async def process_streamed_response(agent, input_items):
                     raw_item = item.raw_item
                     # Get tool name for function calls
                     if hasattr(raw_item, 'name'):
-                        if raw_item.name == "browser_agent":
+                        # Track which agent is being called
+                        tool_name = raw_item.name
+                        last_tool_call = tool_name
+                        
+                        if tool_name == "browser_agent":
                             print(f"\nBrowserAgent: Working...")
-                            last_browser_tool_call = True
                             
                             # Fix for double-encoded JSON - check if the input is a string that contains JSON
                             if hasattr(raw_item, 'parameters') and isinstance(raw_item.parameters, dict) and 'input' in raw_item.parameters:
@@ -145,9 +192,53 @@ async def process_streamed_response(agent, input_items):
                                     except json.JSONDecodeError:
                                         # Not valid JSON, leave as is
                                         pass
+                        elif tool_name == "planner_agent":
+                            print(f"\nPlanner: Analyzing task and creating execution plan...")
+                            # Parse planner parameters
+                            if hasattr(raw_item, 'parameters') and isinstance(raw_item.parameters, dict):
+                                try:
+                                    task = raw_item.parameters.get('task', '')
+                                    if task:
+                                        print(f"Planning task: {task[:100]}..." if len(task) > 100 else f"Planning task: {task}")
+                                except (AttributeError, KeyError) as e:
+                                    logger.warning(f"Error parsing planner parameters: {e}")
+                                    pass
+                                    
+                        elif tool_name == "worker_agent":
+                            print(f"\nWorker: Executing task...")
+                            # Parse worker parameters
+                            if hasattr(raw_item, 'parameters') and isinstance(raw_item.parameters, dict):
+                                try:
+                                    task_instructions = raw_item.parameters.get('task_instructions', '')
+                                    complexity = raw_item.parameters.get('complexity', 'simple')
+                                    
+                                    if task_instructions:
+                                        print(f"Task: {task_instructions[:100]}..." if len(task_instructions) > 100 else f"Task: {task_instructions}")
+                                    
+                                    if complexity == "complex":
+                                        print("Using enhanced reasoning (complex task mode)")
+                                except (AttributeError, KeyError) as e:
+                                    logger.warning(f"Error parsing worker parameters: {e}")
+                                    pass
+                                    
+                        elif tool_name == "validator_agent":
+                            print(f"\nValidator: Verifying task completion and quality...")
+                            # Parse validator parameters
+                            if hasattr(raw_item, 'parameters') and isinstance(raw_item.parameters, dict):
+                                try:
+                                    complexity = raw_item.parameters.get('complexity', 'simple')
+                                    success_criteria = raw_item.parameters.get('success_criteria', '')
+                                    
+                                    if success_criteria:
+                                        print(f"Validating against criteria: {success_criteria[:100]}..." if len(success_criteria) > 100 else f"Validating against criteria: {success_criteria}")
+                                    
+                                    if complexity == "complex":
+                                        print("Using enhanced validation (complex validation mode)")
+                                except (AttributeError, KeyError) as e:
+                                    logger.warning(f"Error parsing validator parameters: {e}")
+                                    pass
                         else:
-                            print(f"\n{agent_name}: Calling tool {raw_item.name}")
-                            last_browser_tool_call = False
+                            print(f"\n{agent_name}: Calling tool {tool_name}")
 
             elif item.type == "tool_call_output_item":
                 # Format output concisely
@@ -156,13 +247,58 @@ async def process_streamed_response(agent, input_items):
                         # For JSON output, don't show duplicative information
                         pass
                     else:
-                        # Use last_browser_tool_call to determine if this is a result from the browser agent
-                        if last_browser_tool_call:
+                        # Determine which agent generated this result based on last tool call
+                        if last_tool_call == "browser_agent":
                             print(f"\nBrowserAgent result: {item.output}")
-                            # Reset the flag after using it
-                            last_browser_tool_call = False
+                        elif last_tool_call == "planner_agent":
+                            # Try to extract key plan info for display
+                            try:
+                                if isinstance(item.output, str):
+                                    if "SUCCESS CRITERIA" in item.output.upper():
+                                        print(f"\nPlanner result: Plan created successfully with defined success criteria")
+                                    else:
+                                        print(f"\nPlanner result: Plan created successfully")
+                                else:
+                                    print(f"\nPlanner result: Plan created successfully")
+                            except:
+                                print(f"\nPlanner result: Plan created successfully")
+                        elif last_tool_call == "worker_agent":
+                            # Try to extract completion status from output
+                            try:
+                                if isinstance(item.output, str):
+                                    if "COMPLETED" in item.output.upper() or "SUCCESS" in item.output.upper():
+                                        print(f"\nWorker result: Task execution completed successfully")
+                                    elif "PARTIAL" in item.output.upper():
+                                        print(f"\nWorker result: Task execution partially completed")
+                                    elif "FAIL" in item.output.upper() or "ERROR" in item.output.upper():
+                                        print(f"\nWorker result: Task execution encountered problems")
+                                    else:
+                                        print(f"\nWorker result: Task execution completed")
+                                else:
+                                    print(f"\nWorker result: Task execution completed")
+                            except:
+                                print(f"\nWorker result: Task execution completed")
+                        elif last_tool_call == "validator_agent":
+                            # Try to extract validation outcome
+                            try:
+                                if isinstance(item.output, str):
+                                    if "PASS" in item.output.upper() and "RECOMMENDATIONS" in item.output.upper():
+                                        print(f"\nValidator result: PASS WITH RECOMMENDATIONS")
+                                    elif "PASS" in item.output.upper():
+                                        print(f"\nValidator result: PASS")
+                                    elif "FAIL" in item.output.upper():
+                                        print(f"\nValidator result: FAIL - Task needs improvement")
+                                    else:
+                                        print(f"\nValidator result: Validation completed")
+                                else:
+                                    print(f"\nValidator result: Validation completed")
+                            except:
+                                print(f"\nValidator result: Validation completed")
                         else:
                             print(f"\n{agent_name} result: {item.output}")
+                        
+                        # Reset the tracking after using it
+                        last_tool_call = None
                 except:
                     pass
 
@@ -319,13 +455,11 @@ async def main():
 AGENT SELECTION GUIDELINES:
 1. For web browsing and website interaction tasks:
    - ALWAYS delegate to browser_agent
-   - The browser_agent has direct Playwright tools:
-     * playwright_navigate: For navigating to pages with configurable options
-     * playwright_click: For clicking elements using CSS selectors
-     * playwright_fill: For filling form inputs
-     * playwright_screenshot: For taking screenshots
-     * playwright_get/post/put/etc.: For direct HTTP API requests
-     * Plus many more specialized tools for direct browser control
+   - The browser_agent is specialized for web interactions and should be given high-level instructions:
+     * Provide the goals to achieve (e.g., "Find product information on Amazon")
+     * Include specific URLs when needed
+     * Describe what information to find or actions to take
+     * Let the agent determine HOW to achieve these goals using its specialized tools
    - This includes ANY requests containing phrases like:
      * "go to website X"
      * "visit Y website"
@@ -364,7 +498,13 @@ AGENT SELECTION GUIDELINES:
      * "optimize this algorithm"
 
 Whenever a user mentions a specific website, web interaction, or browsing action, ALWAYS use browser_agent.
-The browser_agent should always prefer direct Playwright tools over ComputerTool for faster, more reliable interactions."""
+Provide high-level goals and context to the browser_agent, then let it determine the best approach and tools for the task.
+
+CRITICAL INSTRUCTION: 
+NEVER respond to the user with browser instructions in your messages.
+ALWAYS delegate ALL browser interactions to the browser_agent tool.
+If you find yourself writing instructions like "go to website X" or "click on Y", 
+STOP and use the browser_agent tool instead!"""
     })
     
     # Handle test prompt if specified (before the main loop)

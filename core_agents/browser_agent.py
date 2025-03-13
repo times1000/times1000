@@ -667,13 +667,17 @@ PREFERRED TOOL ORDER:
 
 DIRECT PLAYWRIGHT TOOLS:
 1. playwright_navigate: Navigate to URLs with options
+   - By default, this returns cleaned HTML content (scripts and empty elements removed)
+   - This cleaned HTML serves as an excellent starting point for interaction without screenshots
+   - You can use this returned content to immediately identify elements and selectors
    - Examples:
      * playwright_navigate(url="https://example.com")
      * playwright_navigate(url="https://example.com", timeout=5000)
      * playwright_navigate(url="https://example.com", waitUntil="networkidle")
      * playwright_navigate(url="https://example.com", width=1920, height=1080)
-     * playwright_navigate(url="https://example.com", format="markdown")
-     * playwright_navigate(url="https://example.com", format="html")
+     * playwright_navigate(url="https://example.com", format="markdown") - returns content in markdown format
+     * playwright_navigate(url="https://example.com", format="html") - returns full HTML instead of cleaned version
+     * playwright_navigate(url="https://example.com", includeCleaned=false) - disables the default HTML cleaning
 
 2. playwright_screenshot: Capture screenshots
    - Examples:
@@ -759,16 +763,22 @@ When trying to interact with elements on a web page, use these selector formats:
 7. Exact match: "text='Sign up'" (finds element with exactly this text)
 
 If you need to find what elements are available, use these strategies:
-1. ALWAYS USE playwright_get_elements() FIRST - this is the easiest way to discover clickable elements!
-2. Take a screenshot with playwright_screenshot(name="page") to see the page visually
-3. Use playwright_get_text() to get the page content if needed
+1. Review the cleaned HTML returned by playwright_navigate - it contains all the page content with unnecessary elements removed
+2. Use playwright_get_elements() - this is the easiest way to discover clickable elements with their selectors!
+3. Take a screenshot with playwright_screenshot(name="page") only if you need visual confirmation
+4. Use playwright_get_text() if you need plain text extraction
 
 WORKFLOW FOR INTERACTING WITH ELEMENTS:
 1. Navigate to the page: playwright_navigate(url="https://example.com")
-2. Take a screenshot: playwright_screenshot(name="page") 
-3. Find elements: Use playwright_get_elements() to discover all interactive elements with suggested selectors
+   - This returns cleaned HTML by default which you can use to identify elements
+   - The cleaned HTML removes scripts and empty elements, making it easier to analyze
+   - No screenshot is necessary if you can identify elements from this content
+2. If needed, take a screenshot: playwright_screenshot(name="page")
+3. Find elements using one of these methods:
+   - Analyze the cleaned HTML output from playwright_navigate
+   - Use playwright_get_elements() to discover all interactive elements with suggested selectors
 4. Interact with elements using the appropriate tool (click, fill, select, etc.)
-5. Verify the result with another screenshot or text extraction
+5. Verify the result with either the returned HTML content or another screenshot
 
 CAPTCHA HANDLING WORKFLOW:
 1. If you suspect a CAPTCHA might be present (security check, verification page, etc.):
@@ -836,5 +846,8 @@ Always provide detailed error information to the user if an interaction fails af
         ],
         # Use computer-use-preview model when using ComputerTool
         model="computer-use-preview",
-        model_settings=ModelSettings(truncation="auto"),
+        model_settings=ModelSettings(
+            truncation="auto",
+            temperature=0.5  # Reduced temperature for more deterministic behavior
+        )
     )
