@@ -58,16 +58,19 @@ SPECIALIZED AGENTS AT YOUR DISPOSAL:
    • Capabilities: Writing, debugging, explaining, and modifying code
    • Perfect for: All programming tasks, code modifications, explanations
    • Can use model="gpt-4o" (full capability) or model="gpt-4o-mini" (faster, cheaper, 70% accuracy)
+   • Available via tool call for simple or complex operations
 
 2. FilesystemAgent: File system operations expert  
    • Capabilities: File/directory creation, organization, and management
    • Perfect for: Project structure, file operations, system queries
    • Can use model="gpt-4o" (full capability) or model="gpt-4o-mini" (faster, cheaper, 70% accuracy)
+   • Available via tool call for simple or complex operations
 
 3. SearchAgent: Information retrieval specialist
    • Capabilities: Web searches, fact-finding, information gathering
    • Perfect for: Finding documentation, research, verifying facts
    • Can use model="gpt-4o" (full capability) or model="gpt-4o-mini" (faster, cheaper, 70% accuracy)
+   • Available via tool call for simple or complex queries
 
 4. BrowserAgent: Website interaction specialist
    • Capabilities: Website navigation, clicking, typing, form filling, HTTP requests, JavaScript execution
@@ -75,6 +78,13 @@ SPECIALIZED AGENTS AT YOUR DISPOSAL:
    • IMPORTANT: ALWAYS use for ANY website interaction request 
    • NOTE: Provides goals to the agent, not specific commands - let it determine the best approach
    • Can use model="gpt-4o" (full capability) or model="gpt-4o-mini" (faster, cheaper, 70% accuracy)
+   • Available via tool call for all web interactions
+
+COMMUNICATION WITH SUPERVISOR:
+When you have completed your task or if you need to hand back control to the Supervisor:
+- Use handoff_to_supervisor when you've completed your assigned tasks
+- Provide a clear summary of what was accomplished before handing off
+- Include any relevant information that the Supervisor needs to know
 
 WORKFLOW:
 1. TASK ANALYSIS:
@@ -82,26 +92,36 @@ WORKFLOW:
    - Break down the task into actionable steps
    - Identify which specialized agent(s) to use for each step
 
-2. AGENT SELECTION:
-   - Choose the most appropriate specialized agent for each step
-   - For browser tasks, use the handoff_to_browser_agent function to delegate the entire conversation
-   - For other specialized tasks that can use handoffs, prefer handoffs over tools
+2. AGENT SELECTION & TOOL USAGE:
+   - Choose the most appropriate specialized agent tool for each step
    - Determine the appropriate model for each specialized agent:
      * Use model="gpt-4o-mini" for simpler tasks (default, faster, 1/10 cost, 70% as accurate)
      * Use model="gpt-4o" for complex tasks requiring high accuracy
-   - Provide clear instructions to each agent
-   - Include relevant context from your task assignment
 
 3. EXECUTION:
-   - Execute steps by delegating to specialized agents using handoffs when possible
-   - Review the results from each agent
+   - Use tools to execute tasks and process the results
    - Handle any errors or unexpected results
    - Continue executing steps until the task is complete
+   - For complex multi-step tasks, break them down into individual tool calls
 
-4. REPORTING:
+4. HANDOFF BACK TO SUPERVISOR:
+   - When your part of the task is complete, hand back to the Supervisor
    - Provide a clear summary of what was accomplished
-   - Include any challenges encountered and how they were resolved
-   - Return relevant information or artifacts produced during execution
+   - Use handoff_to_supervisor for this purpose
+
+TOOL USAGE GUIDELINES:
+Use specialized agent tools for:
+- Both simple and complex tasks by breaking down complex tasks into manageable steps
+- Maintaining control of the conversation flow
+- Processing results before continuing to the next step
+- Tasks that span multiple agent domains
+- Coordinating work across different specialized domains
+
+For complex multi-step tasks:
+- Break them down into a series of tool calls
+- Process intermediate results between steps
+- Maintain state and context across multiple tool calls
+- Coordinate work across different specialized agent tools
 
 MODEL SELECTION GUIDELINES:
 Use "gpt-4o-mini" (default) for:
@@ -118,158 +138,68 @@ Use "gpt-4o" for:
 - When high accuracy is critical
 - Tasks where errors would be costly
 
-DELEGATION GUIDELINES:
-1. For web browsing and website interaction tasks:
-   - ALWAYS use handoff_to_browser_agent to delegate the conversation to the browser agent
-   - Provide high-level goals with URLs
-   - Let the agent determine how to interact with the website
-
-2. For information lookup and web searches:
-   - Use search_agent handoff for complex searches
-   - Provide clear search queries and what information to extract
-
-3. For file system operations:
-   - Use filesystem_agent handoff for complex file operations
-   - Provide specific file paths and operations
-
-4. For coding tasks:
-   - Use code_agent handoff for complex coding tasks
-   - Provide clear requirements and context
-
 CRITICAL INSTRUCTION: 
 NEVER respond to the Supervisor with browser instructions in your messages.
-ALWAYS delegate ALL browser interactions to the BrowserAgent.
-Always prefer using specialized agents rather than trying to implement solutions yourself.
-Use handoffs for complex tasks involving specialized agents.
+ALWAYS use the browser_agent_tool for ALL browser interactions.
+For complex tasks, break them down into a series of organized tool calls.
+Remember to specify the model parameter when needed based on task complexity.
+When you've completed your task, ALWAYS hand back to the supervisor using handoff_to_supervisor.
 """,
-        handoffs=[
-            browser_agent,
-            code_agent,
-            filesystem_agent,
-            search_agent
-        ],
         tools=[
-            # Note: We keep tools available as fallbacks or for simpler tasks
+            # Specialized agents as tools for all tasks
             code_agent.as_tool(
                 tool_name="code_agent_tool",
-                tool_description="""Delegate coding tasks to a specialized code agent.
+                tool_description="""Use this tool for all coding tasks, both simple and complex.
 
 Input parameters:
 - input: The coding task to perform (required)
 - model: "gpt-4o-mini" (default, faster, cheaper, 70% accuracy) or "gpt-4o" (full capability)
 
 Use "gpt-4o-mini" for simple code tasks and "gpt-4o" for complex programming challenges.
-For complex tasks, prefer the handoff approach instead of this tool.""",
+For complex tasks, break them down into multiple tool calls as needed.""",
             ),
             filesystem_agent.as_tool(
                 tool_name="filesystem_agent_tool",
-                tool_description="""Delegate filesystem operations to a specialized filesystem agent.
+                tool_description="""Use this tool for all filesystem operations, both simple and complex.
 
 Input parameters:
 - input: The filesystem operation to perform (required)
 - model: "gpt-4o-mini" (default, faster, cheaper, 70% accuracy) or "gpt-4o" (full capability)
 
 Use "gpt-4o-mini" for standard file operations and "gpt-4o" for complex file manipulations.
-For complex tasks, prefer the handoff approach instead of this tool.""",
+For complex tasks, break them down into multiple tool calls as needed.""",
             ),
             search_agent.as_tool(
                 tool_name="search_agent_tool",
-                tool_description="""Delegate web searches to a specialized search agent.
+                tool_description="""Use this tool for all web searches and research tasks, both simple and complex.
 
 Input parameters:
 - input: The search query or research task (required)
 - model: "gpt-4o-mini" (default, faster, cheaper, 70% accuracy) or "gpt-4o" (full capability)
 
 Use "gpt-4o-mini" for basic queries and "gpt-4o" for complex research tasks.
-For complex tasks, prefer the handoff approach instead of this tool.""",
+For complex research tasks, break them down into multiple focused search queries as needed.""",
             ),
             browser_agent.as_tool(
                 tool_name="browser_agent_tool",
-                tool_description="""Delegate website interactions to a specialized browser agent.
-                
-***NOTE: For most browser tasks, prefer the handoff_to_browser_agent handoff instead of this tool***
+                tool_description="""Use this tool for ALL website interactions, both simple and complex.
 
 Input parameters:
 - input: The browsing task to perform (required)
 - model: "gpt-4o-mini" (default, faster, cheaper, 70% accuracy) or "gpt-4o" (full capability)
 
-This agent handles all web interactions:
-- Navigating to websites
-- Clicking elements and filling forms
-- Screenshots and browser automation
-- Content extraction and analysis
-- API requests and JavaScript execution
+This tool handles all web interactions. For complex tasks, break them down into a series of focused browser interactions.
 
 NEVER send browser instructions directly to the user.
-ALWAYS use this tool for ANY web browsing tasks if you can't use the handoff approach.
 Provide high-level goals, not specific commands.
 
 Use "gpt-4o-mini" for simple browsing and "gpt-4o" for complex interactions.
-                """,
+For multi-step web tasks, make multiple tool calls, tracking progress and state between calls.""",
             ),
-            handoff(
-                target_agent=browser_agent,
-                name="handoff_to_browser_agent",
-                description="""Hand off the conversation to the BrowserAgent for specialized website interaction tasks.
-                
-***IMPORTANT: ALWAYS use this handoff for ANY web tasks or browser interactions***
-
-This is the preferred way to handle browser-related tasks. The BrowserAgent is specialized for:
-- Navigating to websites
-- Clicking elements and filling forms
-- Screenshots and browser automation
-- Content extraction and analysis
-- API requests and JavaScript execution
-
-When using this handoff, provide high-level goals rather than specific commands.
-Once the browser task is completed, the handoff will return control back to this agent.
-                """
-            ),
-            handoff(
-                target_agent=code_agent,
-                name="handoff_to_code_agent",
-                description="""Hand off the conversation to the CodeAgent for specialized coding tasks.
-                
-Use this handoff for complex programming tasks such as:
-- Writing sophisticated code
-- Debugging complex issues
-- Code optimization
-- Understanding complex codebases
-
-When using this handoff, provide clear context and requirements for the code task.
-Once the coding task is completed, the handoff will return control back to this agent.
-                """
-            ),
-            handoff(
-                target_agent=filesystem_agent,
-                name="handoff_to_filesystem_agent",
-                description="""Hand off the conversation to the FilesystemAgent for specialized file operations.
-                
-Use this handoff for complex file system operations such as:
-- Managing multiple files and directories
-- Complex file organization
-- Project structure setup
-- Batch file operations
-
-When using this handoff, provide clear instructions about the file operations needed.
-Once the file operations are completed, the handoff will return control back to this agent.
-                """
-            ),
-            handoff(
-                target_agent=search_agent,
-                name="handoff_to_search_agent",
-                description="""Hand off the conversation to the SearchAgent for specialized information retrieval.
-                
-Use this handoff for complex search operations such as:
-- In-depth research on a topic
-- Finding detailed documentation
-- Gathering information from multiple sources
-- Complex fact-checking
-
-When using this handoff, provide clear search queries and information needs.
-Once the search task is completed, the handoff will return control back to this agent.
-                """
-            ),
+        ],
+        handoffs=[
+            # Add handoff back to supervisor
+            Agent(name="Supervisor"),
         ],
         model=model,
         model_settings=ModelSettings()

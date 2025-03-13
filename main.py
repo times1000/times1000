@@ -111,12 +111,28 @@ async def process_streamed_response(agent, input_items):
 
         # Handle agent updates (handoffs and tool calls)
         elif event.type == "agent_updated_stream_event":
+            previous_agent = current_agent
             current_agent = event.new_agent.name
             # Check if this is a handoff
             is_handoff = hasattr(event, 'handoff') and event.handoff
+            
             if is_handoff:
-                print(f"\nHandoff to: {current_agent}")
+                # This is a handoff - show more detailed handoff information
+                handoff_source = previous_agent if previous_agent else "Supervisor"
+                print(f"\n🔄 HANDOFF: {handoff_source} → {current_agent}")
+                print(f"Conversation control transferred to specialized {current_agent}")
+                
+                # Add special indicators for specific agent types
+                if "Browser" in current_agent:
+                    print("🌐 Web browsing task delegated to browser specialist")
+                elif "Code" in current_agent:
+                    print("💻 Programming task delegated to code specialist")
+                elif "Filesystem" in current_agent:
+                    print("📁 File operation task delegated to filesystem specialist")
+                elif "Search" in current_agent:
+                    print("🔍 Search task delegated to search specialist")
             else:
+                # This is a regular agent transition
                 print(f"\nAgent: {current_agent}")
 
         # Handle run item stream events (most content comes through here)
@@ -176,7 +192,7 @@ async def process_streamed_response(agent, input_items):
                         tool_name = raw_item.name
                         last_tool_call = tool_name
                         
-                        if tool_name == "browser_agent":
+                        if tool_name == "browser_agent" or tool_name == "browser_agent_tool":
                             print(f"\nBrowserAgent: Working...")
                             
                             # Fix for double-encoded JSON - check if the input is a string that contains JSON
@@ -184,14 +200,40 @@ async def process_streamed_response(agent, input_items):
                                 input_param = raw_item.parameters['input']
                                 if isinstance(input_param, str) and input_param.startswith('{') and input_param.endswith('}'):
                                     try:
-                                        # Try to parse as JSON 
-                                        parsed_input = json.loads(input_param)
+                                        # Try to parse as JSON with single quote support
+                                        parsed_input = json.loads(input_param.replace("'", '"'))
                                         # Replace with parsed object
                                         raw_item.parameters['input'] = parsed_input
-                                        print("Fixed double-encoded JSON input")
                                     except json.JSONDecodeError:
-                                        # Not valid JSON, leave as is
-                                        pass
+                                        # Try to fix common Python dict formatting
+                                        try:
+                                            # Use ast.literal_eval for Python dict strings
+                                            import ast
+                                            parsed_input = ast.literal_eval(input_param)
+                                            raw_item.parameters['input'] = parsed_input
+                                        except Exception:
+                                            # Not valid Python dict either, leave as is
+                                            pass
+                                        
+                            # Fix for passing parameters to playwright_navigate
+                            if hasattr(raw_item, 'parameters') and isinstance(raw_item.parameters, dict):
+                                # Check for direct parameters to tools like playwright_navigate
+                                for key, value in raw_item.parameters.items():
+                                    if isinstance(value, str) and value.startswith('{') and value.endswith('}'):
+                                        try:
+                                            # Try to parse JSON string as object, replacing single quotes with double quotes
+                                            parsed_value = json.loads(value.replace("'", '"'))
+                                            # Replace with parsed object
+                                            raw_item.parameters[key] = parsed_value
+                                        except json.JSONDecodeError:
+                                            # Try ast.literal_eval for Python dict strings
+                                            try:
+                                                import ast
+                                                parsed_value = ast.literal_eval(value)
+                                                raw_item.parameters[key] = parsed_value
+                                            except Exception:
+                                                # Not valid Python dict either, leave as is
+                                                pass
                         elif tool_name == "planner_agent":
                             print(f"\nPlanner: Analyzing task and creating execution plan...")
                             # Parse planner parameters
@@ -221,22 +263,7 @@ async def process_streamed_response(agent, input_items):
                                     logger.warning(f"Error parsing worker parameters: {e}")
                                     pass
                                     
-                        elif tool_name == "validator_agent":
-                            print(f"\nValidator: Verifying task completion and quality...")
-                            # Parse validator parameters
-                            if hasattr(raw_item, 'parameters') and isinstance(raw_item.parameters, dict):
-                                try:
-                                    complexity = raw_item.parameters.get('complexity', 'simple')
-                                    success_criteria = raw_item.parameters.get('success_criteria', '')
-                                    
-                                    if success_criteria:
-                                        print(f"Validating against criteria: {success_criteria[:100]}..." if len(success_criteria) > 100 else f"Validating against criteria: {success_criteria}")
-                                    
-                                    if complexity == "complex":
-                                        print("Using enhanced validation (complex validation mode)")
-                                except (AttributeError, KeyError) as e:
-                                    logger.warning(f"Error parsing validator parameters: {e}")
-                                    pass
+# Validator agent has been removed
                         else:
                             print(f"\n{agent_name}: Calling tool {tool_name}")
 
@@ -278,22 +305,7 @@ async def process_streamed_response(agent, input_items):
                                     print(f"\nWorker result: Task execution completed")
                             except:
                                 print(f"\nWorker result: Task execution completed")
-                        elif last_tool_call == "validator_agent":
-                            # Try to extract validation outcome
-                            try:
-                                if isinstance(item.output, str):
-                                    if "PASS" in item.output.upper() and "RECOMMENDATIONS" in item.output.upper():
-                                        print(f"\nValidator result: PASS WITH RECOMMENDATIONS")
-                                    elif "PASS" in item.output.upper():
-                                        print(f"\nValidator result: PASS")
-                                    elif "FAIL" in item.output.upper():
-                                        print(f"\nValidator result: FAIL - Task needs improvement")
-                                    else:
-                                        print(f"\nValidator result: Validation completed")
-                                else:
-                                    print(f"\nValidator result: Validation completed")
-                            except:
-                                print(f"\nValidator result: Validation completed")
+# Validator agent has been removed
                         else:
                             print(f"\n{agent_name} result: {item.output}")
                         

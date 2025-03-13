@@ -51,7 +51,14 @@ python main.py -p "your prompt here"
 
 ## Core Agents
 
-- **Supervisor**: Orchestrates tasks and delegates to specialized agents
+The system uses a two-agent architecture for main task processing:
+
+- **Supervisor**: Orchestrates tasks and manages the overall workflow
+- **Planner**: Analyzes tasks and creates detailed execution plans
+- **Worker**: Executes specific tasks and delegates to specialized domain agents
+
+Specialized domain agents handle specific types of operations:
+
 - **Browser**: Handles web navigation and interaction through Playwright
 - **Code**: Provides code generation and analysis capabilities
 - **Filesystem**: Manages file operations and project organization
