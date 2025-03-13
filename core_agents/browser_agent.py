@@ -748,12 +748,91 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
 
     return browser_tools
 
-async def create_browser_agent(browser_initializer, initial_context: Optional[BrowserSessionContext] = None, context_wrapper: Optional[Dict[str, Any]] = None):
+class LazyLoadedPlaywrightComputer:
+    """
+    A wrapper around LocalPlaywrightComputer that lazily initializes the browser
+    only when methods are actually called.
+    """
+    def __init__(self, headless=False, silent=True):
+        self._computer = None
+        self.headless = headless
+        self.silent = silent
+        self._initialized = False
+        self._context = None
+        self._context_wrapper = None
+        self._page = None
+    
+    async def _ensure_initialized(self):
+        """Ensure the browser is initialized before use"""
+        if not self._initialized:
+            from utils.browser_computer import LocalPlaywrightComputer
+            try:
+                self._computer = await LocalPlaywrightComputer(
+                    headless=self.headless, 
+                    silent=self.silent
+                ).__aenter__()
+                self._initialized = True
+                logger.info("Created browser instance for BrowserAgent (lazy initialization)")
+                
+                # Copy necessary attributes from computer to self
+                self._page = self._computer._page
+                
+                # Apply context if it was set
+                if self._context:
+                    self._computer._context = self._context
+                
+                if self._context_wrapper:
+                    self._computer._context_wrapper = self._context_wrapper
+                
+            except Exception as e:
+                logger.error(f"Error initializing browser: {e}")
+                print(f"Error initializing browser: {e}")
+                raise
+    
+    # Define proxies for all browser_computer methods and properties
+    def __getattr__(self, name):
+        """Forward attribute access to the real browser_computer after ensuring it's initialized"""
+        
+        # Special case for attributes needed before initialization
+        if name in ['_context', '_context_wrapper', '_page']:
+            return object.__getattribute__(self, name)
+            
+        # For async methods, return a wrapper that ensures initialization
+        async def method_wrapper(*args, **kwargs):
+            await self._ensure_initialized()
+            # Get the method from the real computer
+            method = getattr(self._computer, name)
+            # Call it with the given arguments
+            return await method(*args, **kwargs)
+            
+        # For non-callable attributes, we need to initialize first
+        if not callable(getattr(self._computer, name, None)):
+            # This will initialize the computer if needed
+            asyncio.create_task(self._ensure_initialized())
+            # And then we can return the attribute
+            return getattr(self._computer, name)
+            
+        # Return the wrapper for async methods
+        return method_wrapper
+    
+    async def cleanup(self):
+        """Clean up the browser if it was initialized"""
+        if self._initialized and self._computer:
+            try:
+                await self._computer.__aexit__(None, None, None)
+                self._initialized = False
+                self._page = None
+                logger.info("Cleaned up BrowserAgent browser instance")
+            except Exception as e:
+                logger.error(f"Error cleaning up browser: {e}")
+                print(f"Error cleaning up browser: {e}")
+
+async def create_browser_agent(initial_context: Optional[BrowserSessionContext] = None, context_wrapper: Optional[Dict[str, Any]] = None):
     """
     Creates a browser agent with navigation and interaction capabilities.
+    Each agent gets its own dedicated browser instance that's only created when needed.
     
     Args:
-        browser_initializer: Function to initialize the browser
         initial_context: Optional initial BrowserSessionContext to use
         context_wrapper: Optional context wrapper dictionary that contains a BrowserSessionContext
         
@@ -777,16 +856,15 @@ async def create_browser_agent(browser_initializer, initial_context: Optional[Br
     elif initial_context is not None and context_wrapper is None:
         context_wrapper = {"agent_name": "BrowserAgent", "context": initial_context}
     
-    # Initialize the browser only when needed
     try:
-        browser_computer = await browser_initializer()
-
+        # Create a lazy-loaded browser instance that only initializes when needed
+        browser_computer = LazyLoadedPlaywrightComputer(headless=False, silent=True)
+        
         # Store the initial context in browser computer for potential access
-        if not hasattr(browser_computer, '_context'):
-            browser_computer._context = initial_context
+        browser_computer._context = initial_context
             
         # Also store the context wrapper for easy access
-        if not hasattr(browser_computer, '_context_wrapper') and context_wrapper is not None:
+        if context_wrapper is not None:
             browser_computer._context_wrapper = context_wrapper
 
         # Get all browser tools
@@ -798,8 +876,8 @@ async def create_browser_agent(browser_initializer, initial_context: Optional[Br
         # Add CAPTCHA detection and solving tools
         browser_tools = add_captcha_tools(browser_tools)
     except Exception as e:
-        logger.error(f"Error initializing browser or creating tools: {e}")
-        print(f"Error initializing browser or creating tools: {e}")
+        logger.error(f"Error creating browser tools: {e}")
+        print(f"Error creating browser tools: {e}")
         # Re-raise to fail initialization
         raise
 
@@ -1042,5 +1120,39 @@ Always provide detailed error information to the user if an interaction fails af
     # Add the context wrapper as a property of the agent for state persistence
     if context_wrapper is not None:
         browser_agent.context_wrapper = context_wrapper
+    
+    # Store browser_computer instance with the agent for proper cleanup
+    browser_agent.browser_computer = browser_computer
         
     return browser_agent
+
+async def cleanup_browser_agent(agent):
+    """Clean up resources used by the browser agent."""
+    try:
+        # Look through browser tools to find the computer
+        for tool_name, tool in agent.__dict__.get('_tools', {}).items():
+            if 'playwright_' in tool_name:
+                # This should be our browser tool
+                if hasattr(tool, 'browser_computer'):
+                    computer = tool.browser_computer
+                    # Check if it's our lazy loaded computer
+                    if isinstance(computer, LazyLoadedPlaywrightComputer):
+                        await computer.cleanup()
+                        logger.info("Successfully cleaned up LazyLoadedPlaywrightComputer")
+                        return
+                    # Otherwise it might be a direct browser_computer instance
+                    elif hasattr(computer, '__aexit__'):
+                        await computer.__aexit__(None, None, None)
+                        logger.info("Successfully cleaned up playwright browser")
+                        return
+            
+        # Fallback for backward compatibility
+        if hasattr(agent, 'browser_computer') and agent.browser_computer is not None:
+            if isinstance(agent.browser_computer, LazyLoadedPlaywrightComputer):
+                await agent.browser_computer.cleanup()
+            else:
+                await agent.browser_computer.__aexit__(None, None, None)
+            logger.info("Cleaned up BrowserAgent browser instance (legacy)")
+    except Exception as e:
+        logger.error(f"Error cleaning up BrowserAgent browser instance: {e}")
+        print(f"Error cleaning up BrowserAgent browser instance: {e}")

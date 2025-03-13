@@ -6,24 +6,20 @@ import logging
 from typing import Any, Dict
 
 from agents import Agent, ComputerTool, ModelSettings
+from utils.browser_computer import LocalPlaywrightComputer
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("ComputerAgent")
 
-async def create_computer_agent(browser_initializer):
-    """Creates a computer agent with vision-based browser interaction capabilities."""
+async def create_computer_agent():
+    """Creates a computer agent with vision-based browser interaction capabilities.
+    The browser instance is only created when the agent actually uses the ComputerTool."""
 
-    try:
-        browser_computer = await browser_initializer()
-    except Exception as e:
-        logger.error(f"Error initializing browser or creating tools: {e}")
-        print(f"Error initializing browser or creating tools: {e}")
-        # Re-raise to fail initialization
-        raise
-
+    from utils.browser_computer import LocalPlaywrightComputer
+    
     # Create a specialized agent for computer vision-based interaction
-    return Agent(
+    agent = Agent(
         name="ComputerAgent",
         instructions="""You are a specialized Computer Agent that handles computer vision-based browser interaction. You use the ComputerTool to perform visual interactions with a web browser.
 
@@ -51,8 +47,8 @@ Always strive to accomplish the user's task efficiently while providing clear ex
 """,
         handoff_description="A specialized agent for computer vision-based browser interaction",
         tools=[
-            # The only tool is the ComputerTool which provides computer vision-based interaction
-            ComputerTool(browser_computer)
+            # Use a lazy-loaded browser computer that only initializes when needed
+            ComputerTool(LazyLoadedPlaywrightComputer())
         ],
         # Use computer-use-preview model for ComputerTool
         model="computer-use-preview",
@@ -62,3 +58,119 @@ Always strive to accomplish the user's task efficiently while providing clear ex
             temperature=0.5  # Lower temperature for more predictable behavior
         )
     )
+    
+    return agent
+
+# Create a lazy loader for the browser computer to only initialize it when needed
+class LazyLoadedPlaywrightComputer:
+    """
+    A wrapper around LocalPlaywrightComputer that lazily initializes the browser
+    only when methods are actually called.
+    """
+    def __init__(self, headless=False, silent=True):
+        self._computer = None
+        self.headless = headless
+        self.silent = silent
+        self._initialized = False
+    
+    async def _ensure_initialized(self):
+        """Ensure the browser is initialized before use"""
+        if not self._initialized:
+            from utils.browser_computer import LocalPlaywrightComputer
+            try:
+                self._computer = await LocalPlaywrightComputer(
+                    headless=self.headless, 
+                    silent=self.silent
+                ).__aenter__()
+                self._initialized = True
+                logger.info("Created browser instance for ComputerAgent (lazy initialization)")
+            except Exception as e:
+                logger.error(f"Error initializing browser: {e}")
+                print(f"Error initializing browser: {e}")
+                raise
+    
+    @property
+    def environment(self):
+        # This should be accessible without initialization
+        return "browser"
+    
+    @property
+    def dimensions(self):
+        # This should be accessible without initialization
+        return (1024, 768)
+    
+    async def screenshot(self):
+        await self._ensure_initialized()
+        return await self._computer.screenshot()
+    
+    async def click(self, x, y, button="left"):
+        await self._ensure_initialized()
+        return await self._computer.click(x, y, button)
+    
+    async def double_click(self, x, y):
+        await self._ensure_initialized()
+        return await self._computer.double_click(x, y)
+    
+    async def scroll(self, x, y, scroll_x, scroll_y):
+        await self._ensure_initialized()
+        return await self._computer.scroll(x, y, scroll_x, scroll_y)
+    
+    async def type(self, text):
+        await self._ensure_initialized()
+        return await self._computer.type(text)
+    
+    async def wait(self, ms=1000):
+        await self._ensure_initialized()
+        return await self._computer.wait(ms)
+    
+    async def move(self, x, y):
+        await self._ensure_initialized()
+        return await self._computer.move(x, y)
+    
+    async def keypress(self, keys):
+        await self._ensure_initialized()
+        return await self._computer.keypress(keys)
+    
+    async def drag(self, path):
+        await self._ensure_initialized()
+        return await self._computer.drag(path)
+    
+    async def goto(self, url):
+        await self._ensure_initialized()
+        return await self._computer.goto(url)
+    
+    async def navigate(self, url):
+        await self._ensure_initialized()
+        return await self._computer.navigate(url)
+    
+    async def cleanup(self):
+        """Clean up the browser if it was initialized"""
+        if self._initialized and self._computer:
+            try:
+                await self._computer.__aexit__(None, None, None)
+                self._initialized = False
+                logger.info("Cleaned up ComputerAgent browser instance")
+            except Exception as e:
+                logger.error(f"Error cleaning up browser: {e}")
+                print(f"Error cleaning up browser: {e}")
+
+async def cleanup_computer_agent(agent):
+    """Clean up resources used by the computer agent."""
+    try:
+        # Get the tool from the agent
+        for tool in agent.tools:
+            if tool.name == "computer_use_preview":
+                computer = tool.computer
+                # Check if it's our lazy loaded computer
+                if isinstance(computer, LazyLoadedPlaywrightComputer):
+                    await computer.cleanup()
+                    logger.info("Successfully cleaned up LazyLoadedPlaywrightComputer")
+                    return
+        
+        # Fallback for backward compatibility
+        if hasattr(agent, 'browser_computer') and agent.browser_computer is not None:
+            await agent.browser_computer.__aexit__(None, None, None)
+            logger.info("Cleaned up ComputerAgent browser instance (legacy)")
+    except Exception as e:
+        logger.error(f"Error cleaning up ComputerAgent browser instance: {e}")
+        print(f"Error cleaning up ComputerAgent browser instance: {e}")
