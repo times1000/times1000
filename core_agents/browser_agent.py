@@ -95,13 +95,13 @@ def create_resilient_browser_tools(browser_tools: Dict[str, Any]) -> Dict[str, A
                 # If we still don't have a context wrapper, create a default one
                 if context_wrapper is None:
                     browser_context = BrowserSessionContext()
-                    context_wrapper = AgentContextWrapper(agent_name="BrowserAgent", context=browser_context)
+                    context_wrapper = {"agent_name": "BrowserAgent", "context": browser_context}
                 
                 # Check that the context is a BrowserSessionContext
-                if not isinstance(context_wrapper.context, BrowserSessionContext):
+                if not isinstance(context_wrapper.get("context"), BrowserSessionContext):
                     # If it's not, create a new one and warn
                     logger.warning(f"Context in wrapper is not a BrowserSessionContext. Creating a new one.")
-                    context_wrapper.context = BrowserSessionContext()
+                    context_wrapper["context"] = BrowserSessionContext()
                 
                 # Add context to kwargs if not already there
                 if 'context_wrapper' not in kwargs:
@@ -147,7 +147,7 @@ def create_resilient_browser_tools(browser_tools: Dict[str, Any]) -> Dict[str, A
                                         error_message = result
                                 
                                 # Update navigation history
-                                context_wrapper.context.add_navigation_entry(
+                                context_wrapper["context"].add_navigation_entry(
                                     url=url,
                                     title=title,
                                     status_code=status_code,
@@ -168,14 +168,14 @@ def create_resilient_browser_tools(browser_tools: Dict[str, Any]) -> Dict[str, A
                                                         cookie_dict[cookie.get('name')] = cookie
                                             
                                             if cookie_dict:
-                                                context_wrapper.context.add_cookies(domain, cookie_dict)
+                                                context_wrapper["context"].add_cookies(domain, cookie_dict)
                                 except Exception as cookie_err:
                                     logger.warning(f"Error extracting cookies: {cookie_err}")
                             
                             elif "get_location" in _tool_name:
                                 # Store location data in session if successful
                                 if isinstance(result, str) and "Error" not in result:
-                                    context_wrapper.context.store_session_data("location_data", result)
+                                    context_wrapper["context"].store_session_data("location_data", result)
                             
                         return result
                     except Exception as e:
@@ -183,7 +183,7 @@ def create_resilient_browser_tools(browser_tools: Dict[str, Any]) -> Dict[str, A
                         
                         # Update context with error if it's a navigation operation
                         if context_wrapper and "navigate" in _tool_name and url:
-                            context_wrapper.context.add_navigation_entry(
+                            context_wrapper["context"].add_navigation_entry(
                                 url=url,
                                 success=False,
                                 error_message=str(e)
@@ -240,7 +240,7 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
     from agents.tool import function_tool
 
     @function_tool
-    async def detect_and_solve_captcha(context_wrapper: Optional[AgentContextWrapper] = None):
+    async def detect_and_solve_captcha(context_wrapper: Optional[Dict[str, Any]] = None):
         """
         Detects if the current page contains a CAPTCHA and attempts to solve it.
         This tool helps identify and solve common CAPTCHA types including:
@@ -262,13 +262,13 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
         # Create context if not provided
         if context_wrapper is None:
             browser_context = BrowserSessionContext()
-            context_wrapper = AgentContextWrapper(agent_name="BrowserAgent", context=browser_context)
+            context_wrapper = {"agent_name": "BrowserAgent", "context": browser_context}
         
         # Check that the context is a BrowserSessionContext
-        if not isinstance(context_wrapper.context, BrowserSessionContext):
+        if not isinstance(context_wrapper.get("context"), BrowserSessionContext):
             # If it's not, create a new one and warn
             logger.warning(f"Context in wrapper is not a BrowserSessionContext. Creating a new one.")
-            context_wrapper.context = BrowserSessionContext()
+            context_wrapper["context"] = BrowserSessionContext()
 
         if not bc._page:
             return "Error: Browser is not initialized or no page is currently open"
@@ -719,7 +719,7 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
                 from datetime import datetime
                 
                 # Store CAPTCHA results in the session
-                context_wrapper.context.store_session_data("last_captcha_check", {
+                context_wrapper["context"].store_session_data("last_captcha_check", {
                     "timestamp": datetime.now().isoformat(),
                     "url": bc._page.url if bc._page else None,
                     "found": captcha_results.get('found', False),
@@ -736,7 +736,7 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
                         # For checkbox type, check if we successfully verified the checkbox
                         success = 'is_checked' in locals() and is_checked
                     
-                    context_wrapper.context.store_session_data("captcha_solved", {
+                    context_wrapper["context"].store_session_data("captcha_solved", {
                         "timestamp": datetime.now().isoformat(),
                         "url": bc._page.url if bc._page else None,
                         "type": captcha_results.get('type', 'unknown'),
@@ -748,14 +748,14 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
 
     return browser_tools
 
-async def create_browser_agent(browser_initializer, initial_context: Optional[BrowserSessionContext] = None, context_wrapper: Optional[AgentContextWrapper] = None):
+async def create_browser_agent(browser_initializer, initial_context: Optional[BrowserSessionContext] = None, context_wrapper: Optional[Dict[str, Any]] = None):
     """
     Creates a browser agent with navigation and interaction capabilities.
     
     Args:
         browser_initializer: Function to initialize the browser
         initial_context: Optional initial BrowserSessionContext to use
-        context_wrapper: Optional AgentContextWrapper that contains a BrowserSessionContext
+        context_wrapper: Optional context wrapper dictionary that contains a BrowserSessionContext
         
     Returns:
         Browser agent with context management capabilities
@@ -766,16 +766,16 @@ async def create_browser_agent(browser_initializer, initial_context: Optional[Br
     
     # If context_wrapper is provided, use its context if it's a BrowserSessionContext
     if context_wrapper is not None:
-        if isinstance(context_wrapper.context, BrowserSessionContext):
-            initial_context = context_wrapper.context
+        if isinstance(context_wrapper.get("context"), BrowserSessionContext):
+            initial_context = context_wrapper.get("context")
         else:
             # Create a new BrowserSessionContext and update the wrapper
             logger.warning(f"Context in wrapper is not a BrowserSessionContext. Creating a new one.")
             initial_context = BrowserSessionContext(user_id=f"user_{int(time.time())}")
-            context_wrapper.context = initial_context
+            context_wrapper["context"] = initial_context
     # If no context_wrapper exists but we have an initial_context, create a wrapper
     elif initial_context is not None and context_wrapper is None:
-        context_wrapper = AgentContextWrapper(agent_name="BrowserAgent", context=initial_context)
+        context_wrapper = {"agent_name": "BrowserAgent", "context": initial_context}
     
     # Initialize the browser only when needed
     try:

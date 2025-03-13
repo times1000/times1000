@@ -10,6 +10,7 @@ from typing import Callable, Any, Dict, List, Optional, TypeVar, Generic, Union,
 from enum import Enum
 from dataclasses import dataclass
 from functools import wraps
+from datetime import datetime
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -266,6 +267,190 @@ def calculate_retry_delay(
     
     # Ensure we don't exceed max_delay
     return min(delay, max_delay)
+
+@dataclass
+class NavigationHistoryEntry:
+    """A single entry in the browser navigation history"""
+    url: str
+    timestamp: datetime
+    title: Optional[str] = None
+    status_code: Optional[int] = None
+    success: bool = True
+    error_message: Optional[str] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert the entry to a dictionary"""
+        return {
+            "url": self.url,
+            "timestamp": self.timestamp.isoformat(),
+            "title": self.title,
+            "status_code": self.status_code,
+            "success": self.success,
+            "error_message": self.error_message
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'NavigationHistoryEntry':
+        """Create an entry from a dictionary"""
+        return cls(
+            url=data.get("url", ""),
+            timestamp=datetime.fromisoformat(data.get("timestamp")) if data.get("timestamp") else datetime.now(),
+            title=data.get("title"),
+            status_code=data.get("status_code"),
+            success=data.get("success", True),
+            error_message=data.get("error_message")
+        )
+
+@dataclass
+class BrowserSessionContext:
+    """Context for maintaining state between browser interactions"""
+    user_id: str = ""
+    visited_urls: List[str] = None
+    navigation_history: List[NavigationHistoryEntry] = None
+    session_data: Dict[str, Any] = None
+    cookies: Dict[str, Dict[str, Any]] = None
+    headers: Dict[str, str] = None
+    current_url: Optional[str] = None
+    
+    def __post_init__(self):
+        """Initialize lists and dicts if not provided"""
+        if self.visited_urls is None:
+            self.visited_urls = []
+        if self.navigation_history is None:
+            self.navigation_history = []
+        if self.session_data is None:
+            self.session_data = {}
+        if self.cookies is None:
+            self.cookies = {}
+        if self.headers is None:
+            self.headers = {}
+    
+    def add_navigation_entry(self, url: str, title: Optional[str] = None, 
+                           status_code: Optional[int] = None, success: bool = True, 
+                           error_message: Optional[str] = None) -> None:
+        """Add a new entry to the navigation history"""
+        entry = NavigationHistoryEntry(
+            url=url,
+            timestamp=datetime.now(),
+            title=title,
+            status_code=status_code,
+            success=success,
+            error_message=error_message
+        )
+        
+        self.navigation_history.append(entry)
+        
+        # Add to visited URLs if successful and not already in the list
+        if success and url not in self.visited_urls:
+            self.visited_urls.append(url)
+            
+        # Update current URL
+        if success:
+            self.current_url = url
+    
+    def add_cookies(self, domain: str, cookies: Dict[str, Any]) -> None:
+        """Add cookies for a specific domain"""
+        if domain not in self.cookies:
+            self.cookies[domain] = {}
+            
+        # Update existing cookies
+        self.cookies[domain].update(cookies)
+    
+    def get_cookies_for_domain(self, domain: str) -> Dict[str, Any]:
+        """Get cookies for a specific domain"""
+        return self.cookies.get(domain, {})
+    
+    def get_all_cookies(self) -> Dict[str, Dict[str, Any]]:
+        """Get all cookies"""
+        return self.cookies
+    
+    def clear_cookies(self) -> None:
+        """Clear all cookies"""
+        self.cookies = {}
+    
+    def set_header(self, name: str, value: str) -> None:
+        """Set a header for future requests"""
+        self.headers[name] = value
+    
+    def get_headers(self) -> Dict[str, str]:
+        """Get all headers"""
+        return self.headers
+    
+    def store_session_data(self, key: str, value: Any) -> None:
+        """Store arbitrary session data"""
+        self.session_data[key] = value
+    
+    def get_session_data(self, key: str, default: Any = None) -> Any:
+        """Get session data by key"""
+        return self.session_data.get(key, default)
+    
+    def get_last_visit(self) -> Optional[NavigationHistoryEntry]:
+        """Get the most recent navigation history entry"""
+        if not self.navigation_history:
+            return None
+        return self.navigation_history[-1]
+    
+    def get_previous_visit(self) -> Optional[NavigationHistoryEntry]:
+        """Get the second most recent navigation history entry"""
+        if len(self.navigation_history) < 2:
+            return None
+        return self.navigation_history[-2]
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert context to dictionary for serialization"""
+        return {
+            "user_id": self.user_id,
+            "visited_urls": self.visited_urls,
+            "navigation_history": [entry.to_dict() for entry in self.navigation_history],
+            "session_data": self.session_data,
+            "cookies": self.cookies,
+            "headers": self.headers,
+            "current_url": self.current_url
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'BrowserSessionContext':
+        """Create context from dictionary"""
+        context = cls(
+            user_id=data.get("user_id", ""),
+            visited_urls=data.get("visited_urls", []),
+            navigation_history=[
+                NavigationHistoryEntry.from_dict(entry) 
+                for entry in data.get("navigation_history", [])
+            ],
+            session_data=data.get("session_data", {}),
+            cookies=data.get("cookies", {}),
+            headers=data.get("headers", {}),
+            current_url=data.get("current_url")
+        )
+        return context
+
+@dataclass
+class AgentContextWrapper(Generic[T]):
+    """Wrapper for maintaining context across agent calls"""
+    agent_name: str
+    agent_context: T  # Generic type for the context (e.g., BrowserSessionContext)
+    metadata: Dict[str, Any] = None
+    
+    def __post_init__(self):
+        """Initialize metadata dict if not provided"""
+        if self.metadata is None:
+            self.metadata = {}
+    
+    def update_metadata(self, key: str, value: Any) -> None:
+        """Update metadata"""
+        self.metadata[key] = value
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert wrapper to dictionary for serialization"""
+        context_dict = {}
+        if hasattr(self.agent_context, 'to_dict'):
+            context_dict = self.agent_context.to_dict()
+        return {
+            "agent_name": self.agent_name,
+            "context": context_dict,
+            "metadata": self.metadata
+        }
 
 def with_retry(
     max_retries: int = 3,

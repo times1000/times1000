@@ -71,20 +71,20 @@ def check_api_keys():
     if not os.environ.get("OPENAI_API_KEY"):
         error_message = textwrap.dedent("""
         ERROR: OpenAI API key is missing!
-        
+
         You need to set the OPENAI_API_KEY environment variable to use this application.
-        
+
         You can do this in one of the following ways:
-        
+
         1. Set it for the current session (replace YOUR_API_KEY with your actual key):
            export OPENAI_API_KEY=YOUR_API_KEY  # Linux/macOS
            set OPENAI_API_KEY=YOUR_API_KEY     # Windows
-        
+
         2. Add it to your shell profile (~/.bashrc, ~/.zshrc, etc.)
-        
+
         3. Create a .env file in the project directory with:
            OPENAI_API_KEY=YOUR_API_KEY
-        
+
         You can get an API key from: https://platform.openai.com/api-keys
         """)
         print(error_message)
@@ -95,11 +95,11 @@ def check_api_keys():
 async def process_streamed_response(agent, input_items):
     # Create console for rich text rendering
     console = Console()
-    
+
     # Track the last tool call to identify which agent a result belongs to
     last_tool_call = None
     current_agent = "Supervisor"
-    
+
     # Create a streamed result
     result = Runner.run_streamed(agent, input_items)
 
@@ -115,13 +115,13 @@ async def process_streamed_response(agent, input_items):
             current_agent = event.new_agent.name
             # Check if this is a handoff
             is_handoff = hasattr(event, 'handoff') and event.handoff
-            
+
             if is_handoff:
                 # This is a handoff - show more detailed handoff information
                 handoff_source = previous_agent if previous_agent else "Supervisor"
                 print(f"\n🔄 HANDOFF: {handoff_source} → {current_agent}")
                 print(f"Conversation control transferred to specialized {current_agent}")
-                
+
                 # Add special indicators for specific agent types
                 if "Browser" in current_agent:
                     print("🌐 Web browsing task delegated to browser specialist")
@@ -143,40 +143,9 @@ async def process_streamed_response(agent, input_items):
             # Handle different item types
             if item.type == "message_output_item":
                 message_text = ItemHelpers.text_message_output(item)
-                
-                # Check if this message might be browser instructions that should have been a tool call
-                browser_instruction_keywords = [
-                    "navigate to", "go to", "visit", "open browser", "click on", 
-                    "type in", "fill", "select", "submit", "login page", "enter", 
-                    "browse to", "search for", "check the website", "look at the website",
-                    "switch to tab", "press the button", "find the element", "scroll", 
-                    "take a screenshot", "download", "upload", "log in", "sign in",
-                    "create account", "add to cart", "checkout", "find information",
-                    "locate the", "look for", "explore", "interact with"
-                ]
-                
-                # Flag potential browser instructions that should be tool calls
-                potential_browser_instruction = False
-                if agent_name == "Supervisor" or agent_name == "Worker":
-                    for keyword in browser_instruction_keywords:
-                        if keyword in message_text.lower():
-                            potential_browser_instruction = True
-                            break
-                
+
                 print(f"\n{agent_name}:")
-                
-                # Add warning if this appears to be a browser instruction that should be a tool call
-                if potential_browser_instruction:
-                    if agent_name == "Supervisor":
-                        warning = "The supervisor should NEVER give browser instructions directly to the user."
-                        warning += "\nInstead, it should use the worker_agent tool which in turn uses browser_agent."
-                    else:  # Worker
-                        warning = "The worker should NEVER give browser instructions directly to the user."
-                        warning += "\nInstead, it should use the browser_agent tool for ALL web interactions."
-                        
-                    print("\n⚠️ CRITICAL WARNING: This message appears to contain browser instructions that should be delegated to the appropriate agent tool.")
-                    print(warning)
-                
+
                 try:
                     console.print(Markdown(message_text))
                 except Exception:
@@ -191,10 +160,10 @@ async def process_streamed_response(agent, input_items):
                         # Track which agent is being called
                         tool_name = raw_item.name
                         last_tool_call = tool_name
-                        
+
                         if tool_name == "browser_agent" or tool_name == "browser_agent_tool":
                             print(f"\nBrowserAgent: Working...")
-                            
+
                             # Fix for double-encoded JSON - check if the input is a string that contains JSON
                             if hasattr(raw_item, 'parameters') and isinstance(raw_item.parameters, dict) and 'input' in raw_item.parameters:
                                 input_param = raw_item.parameters['input']
@@ -214,7 +183,7 @@ async def process_streamed_response(agent, input_items):
                                         except Exception:
                                             # Not valid Python dict either, leave as is
                                             pass
-                                        
+
                             # Fix for passing parameters to playwright_navigate
                             if hasattr(raw_item, 'parameters') and isinstance(raw_item.parameters, dict):
                                 # Check for direct parameters to tools like playwright_navigate
@@ -245,7 +214,7 @@ async def process_streamed_response(agent, input_items):
                                 except (AttributeError, KeyError) as e:
                                     logger.warning(f"Error parsing planner parameters: {e}")
                                     pass
-                                    
+
                         elif tool_name == "worker_agent":
                             print(f"\nWorker: Executing task...")
                             # Parse worker parameters
@@ -253,17 +222,15 @@ async def process_streamed_response(agent, input_items):
                                 try:
                                     task_instructions = raw_item.parameters.get('task_instructions', '')
                                     complexity = raw_item.parameters.get('complexity', 'simple')
-                                    
+
                                     if task_instructions:
                                         print(f"Task: {task_instructions[:100]}..." if len(task_instructions) > 100 else f"Task: {task_instructions}")
-                                    
+
                                     if complexity == "complex":
                                         print("Using enhanced reasoning (complex task mode)")
                                 except (AttributeError, KeyError) as e:
                                     logger.warning(f"Error parsing worker parameters: {e}")
                                     pass
-                                    
-# Validator agent has been removed
                         else:
                             print(f"\n{agent_name}: Calling tool {tool_name}")
 
@@ -305,10 +272,9 @@ async def process_streamed_response(agent, input_items):
                                     print(f"\nWorker result: Task execution completed")
                             except:
                                 print(f"\nWorker result: Task execution completed")
-# Validator agent has been removed
                         else:
                             print(f"\n{agent_name} result: {item.output}")
-                        
+
                         # Reset the tracking after using it
                         last_tool_call = None
                 except:
@@ -324,28 +290,28 @@ def setup_readline():
     if readline is None:
         print("Readline module not available. Command history disabled.")
         return False
-        
+
     # Skip readline setup if we're in an environment that doesn't support it well
     if not sys.stdin.isatty():
         return False
-        
+
     try:
         # Use a persistent history file in the user's home directory
         home_dir = os.path.expanduser("~")
         history_dir = os.path.join(home_dir, ".times1000_history")
-        
+
         # Create directory if it doesn't exist
         os.makedirs(history_dir, exist_ok=True)
         histfile = os.path.join(history_dir, "history")
-        
+
         # If we still can't access the history file location, fallback to current directory
         if not os.access(history_dir, os.W_OK):
             # Use current directory as fallback
             histfile = os.path.join(os.getcwd(), ".times1000_history")
-        
+
         # Set history length
         readline.set_history_length(1000)
-        
+
         # Configure readline based on which module we're using
         if readline_module == "gnureadline":
             # GNU readline has consistent behavior
@@ -362,19 +328,19 @@ def setup_readline():
             readline.parse_and_bind("tab: complete")
             readline.parse_and_bind(r'"\e[A": previous-history')  # Up arrow
             readline.parse_and_bind(r'"\e[B": next-history')      # Down arrow
-        
+
         # Save history on exit
         atexit.register(readline.write_history_file, histfile)
-        
+
         # Try to read history file if it exists
         try:
             readline.read_history_file(histfile)
         except:
             # If reading fails, create a new file
             readline.write_history_file(histfile)
-        
+
         return True
-        
+
     except Exception as e:
         print(f"Warning: Readline functionality limited: {str(e)}")
         print("Command history will not be available for this session.")
@@ -396,7 +362,7 @@ def safe_input(prompt, readline_available=True):
         except Exception as e:
             print(f"\nInput error with readline: {str(e)}. Trying fallback method...")
             readline_available = False  # Fall back to direct stdin
-    
+
     # Fallback method without readline
     if not readline_available:
         print(prompt, end='', flush=True)
@@ -417,27 +383,27 @@ def safe_input(prompt, readline_available=True):
 async def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Run the Supervisor Agent")
-    parser.add_argument("-p", "--prompt", 
-                        help="Initial prompt to run at startup", 
+    parser.add_argument("-p", "--prompt",
+                        help="Initial prompt to run at startup",
                         type=str)
-    parser.add_argument("-t", "--test", 
-                        help="Run a test prompt to verify browser agent functionality", 
+    parser.add_argument("-t", "--test",
+                        help="Run a test prompt to verify browser agent functionality",
                         action="store_true")
     parser.add_argument("--skip-key-check",
                         help="Skip the API key check (for testing only)",
                         action="store_true")
     args = parser.parse_args()
-    
+
     # Check for required API keys unless specifically skipped
     if not args.skip_key_check and not check_api_keys():
         sys.exit(1)
-    
+
     # Setup readline for command history
     readline_available = setup_readline()
-    
+
     # Initialize browser_computer as None - it will be created only when needed (lazy loading)
     browser_computer = None
-    
+
     # Create the supervisor agent with a function to initialize the browser
     async def init_browser():
         nonlocal browser_computer
@@ -447,93 +413,33 @@ async def main():
             # Don't use atexit with asyncio.run() as it causes issues with closed event loops
             # We'll handle cleanup in the main loop exception handlers instead
         return browser_computer
-    
+
     # Browser computer will be initialized when needed (lazy loading)
-        
+
     # Create the supervisor agent with parallel execution capabilities
     agent = await create_supervisor_agent(init_browser)
-    
+
     # Initialize conversation history
     input_items: List = []
 
     # Display welcome message with available functionality
     print("\nSupervisor Ready.")
-    
-    # Add a first message to the conversation to prime the agent
-    input_items.append({
-        "role": "system", 
-        "content": """IMPORTANT AGENT SELECTION GUIDELINES:
 
-AGENT SELECTION GUIDELINES:
-1. For web browsing and website interaction tasks:
-   - ALWAYS delegate to browser_agent
-   - The browser_agent is specialized for web interactions and should be given high-level instructions:
-     * Provide the goals to achieve (e.g., "Find product information on Amazon")
-     * Include specific URLs when needed
-     * Describe what information to find or actions to take
-     * Let the agent determine HOW to achieve these goals using its specialized tools
-   - This includes ANY requests containing phrases like:
-     * "go to website X"
-     * "visit Y website"
-     * "browse Z"
-     * "check out site X"
-     * "explore website Y"
-     * "open Z in browser"
-     * "interact with X"
-     * "click on Y"
-     * "fill out form"
-     * "API request"
-     * "reddit" or any specific website name
-
-2. For information lookup and web searches:
-   - Delegate to search_agent
-   - This includes requests like:
-     * "find information about X"
-     * "search for Y"
-     * "look up Z"
-     * "research topic X"
-
-3. For file system operations:
-   - Delegate to filesystem_agent
-   - This includes requests like:
-     * "create file X"
-     * "read file Y"
-     * "list directory Z"
-     * "organize files"
-
-4. For coding tasks:
-   - Delegate to code_agent
-   - This includes requests like:
-     * "write code for X"
-     * "debug this function"
-     * "explain this code"
-     * "optimize this algorithm"
-
-Whenever a user mentions a specific website, web interaction, or browsing action, ALWAYS use browser_agent.
-Provide high-level goals and context to the browser_agent, then let it determine the best approach and tools for the task.
-
-CRITICAL INSTRUCTION: 
-NEVER respond to the user with browser instructions in your messages.
-ALWAYS delegate ALL browser interactions to the browser_agent tool.
-If you find yourself writing instructions like "go to website X" or "click on Y", 
-STOP and use the browser_agent tool instead!"""
-    })
-    
     # Handle test prompt if specified (before the main loop)
     if args.test:
         print("\nRunning browser agent test...")
-        
+
         # Test browser agent with a simple prompt
         test_prompt = "Go to https://example.com and tell me what you see on the page"
         print(f"Test prompt: {test_prompt}")
-        
+
         # Run the test
         input_items.append({"content": test_prompt, "role": "user"})
         with trace("Test prompt processing"):
             result = await process_streamed_response(agent, input_items)
             input_items = result.to_input_list()
             print("Browser agent test completed.")
-    
+
     # Handle initial prompt if specified (before the main loop)
     elif args.prompt:
         print(f"\nRunning initial prompt: {args.prompt}")
@@ -541,18 +447,18 @@ STOP and use the browser_agent tool instead!"""
         with trace("Initial prompt processing"):
             result = await process_streamed_response(agent, input_items)
             input_items = result.to_input_list()
-    
+
     try:
         while True:
             try:
                 # Use appropriate input method
                 user_input = safe_input("\n> ", readline_available)
-                
+
                 # Check for exit command
                 if user_input.lower() in ('exit', 'quit'):
                     print("Exiting Supervisor Agent")
                     break
-                    
+
                 if user_input.strip():
                     # Add user input to conversation history
                     input_items.append({"content": user_input, "role": "user"})
@@ -576,7 +482,7 @@ STOP and use the browser_agent tool instead!"""
                 await browser_computer.__aexit__(None, None, None)
             except Exception as e:
                 print(f"Error during browser cleanup: {e}")
-    
+
     print("Exiting application")
 
 # Run the supervisor agent when this file is executed

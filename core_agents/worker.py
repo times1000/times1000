@@ -3,51 +3,41 @@ worker.py - Defines a worker agent that executes specific tasks assigned by the 
 """
 
 import logging
+import time
 from typing import Dict, Any, List, Optional, Tuple
 from functools import wraps
 
 from agents import Agent, ModelSettings, handoff
-from utils import with_retry, RetryStrategy
+from utils import with_retry, RetryStrategy, BrowserSessionContext, AgentContextWrapper
+
+from core_agents.code_agent import create_code_agent
+from core_agents.filesystem_agent import create_filesystem_agent
+from core_agents.search_agent import create_search_agent
+from core_agents.browser_agent import create_browser_agent
+from core_agents.computer_agent import create_computer_agent
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("Worker")
 
-async def create_worker_agent(code_agent, filesystem_agent, search_agent, browser_agent, complexity: str = "simple") -> Agent:
+async def create_worker_agent(browser_initializer) -> Agent:
     """
     Creates a Worker agent that executes tasks assigned by the supervisor by calling specialized agents.
-
-    Args:
-        code_agent: The specialized code agent
-        filesystem_agent: The specialized filesystem agent
-        search_agent: The specialized search agent
-        browser_agent: The specialized browser agent
-        complexity: The complexity level of the task ('simple' or 'complex')
 
     Returns:
         An Agent instance that can execute tasks by delegating to specialized agents
     """
-    # Determine model based on complexity
-    def _complexity_to_model(complexity: str) -> str:
-        """Maps complexity level to appropriate model."""
-        if complexity == "complex":
-            return "gpt-4o"
-        else:  # simple or default
-            return "gpt-4o-mini"
-            
-    model = _complexity_to_model(complexity)
+    from utils import BrowserSessionContext
     
-    # Apply retry mechanisms for worker agent operations
-    async def with_worker_retry(func):
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            return await with_retry(
-                max_retries=2,
-                retry_strategy=RetryStrategy.EXPONENTIAL_BACKOFF,
-                base_delay=1.0
-            )(func)(*args, **kwargs)
-        return wrapper
-    
+    # Create a shared browser session context for both browser agents
+    browser_context = BrowserSessionContext(user_id=f"user_{int(time.time())}")
+
+    code_agent = create_code_agent()
+    filesystem_agent = create_filesystem_agent()
+    search_agent = create_search_agent()
+    browser_agent = await create_browser_agent(browser_initializer, initial_context=browser_context)
+    computer_agent = await create_computer_agent(browser_initializer)
+
     # Create the worker agent
     agent = Agent(
         name="Worker",
@@ -60,25 +50,32 @@ SPECIALIZED AGENTS AT YOUR DISPOSAL:
    • Can use model="gpt-4o" (full capability) or model="gpt-4o-mini" (faster, cheaper, 70% accuracy)
    • Available via tool call for simple or complex operations
 
-2. FilesystemAgent: File system operations expert  
+2. FilesystemAgent: File system operations expert
    • Capabilities: File/directory creation, organization, and management
    • Perfect for: Project structure, file operations, system queries
-   • Can use model="gpt-4o" (full capability) or model="gpt-4o-mini" (faster, cheaper, 70% accuracy)
+   • Can use model="gpt-4o" (full capability) or model="gpt-4o-mini" (preferred for most tasks - faster, cheaper, 70% accuracy)
    • Available via tool call for simple or complex operations
 
 3. SearchAgent: Information retrieval specialist
    • Capabilities: Web searches, fact-finding, information gathering
    • Perfect for: Finding documentation, research, verifying facts
-   • Can use model="gpt-4o" (full capability) or model="gpt-4o-mini" (faster, cheaper, 70% accuracy)
+   • Can use model="gpt-4o" (full capability) or model="gpt-4o-mini" (preferred for most tasks - faster, cheaper, 70% accuracy)
    • Available via tool call for simple or complex queries
 
 4. BrowserAgent: Website interaction specialist
    • Capabilities: Website navigation, clicking, typing, form filling, HTTP requests, JavaScript execution
    • Perfect for: Website interactions, form filling, UI exploration, API requests
-   • IMPORTANT: ALWAYS use for ANY website interaction request 
+   • IMPORTANT: ALWAYS use for ANY website interaction request that can use CSS selectors
    • NOTE: Provides goals to the agent, not specific commands - let it determine the best approach
-   • Can use model="gpt-4o" (full capability) or model="gpt-4o-mini" (faster, cheaper, 70% accuracy)
+   • Can use model="gpt-4o" (full capability) or model="gpt-4o-mini" (preferred for most tasks - faster, cheaper, 70% accuracy)
    • Available via tool call for all web interactions
+
+5. ComputerAgent: Computer vision-based interaction specialist
+   • Capabilities: Visual browser interaction using computer vision
+   • Perfect for: Complex interactions where CSS selectors don't work
+   • IMPORTANT: More expensive to use than BrowserAgent - use only when necessary
+   • Uses model="computer-use-preview" specifically designed for visual interaction
+   • ONLY use when browser_agent has failed with selector-based approaches
 
 COMMUNICATION WITH SUPERVISOR:
 When you have completed your task or if you need to hand back control to the Supervisor:
@@ -138,7 +135,7 @@ Use "gpt-4o" for:
 - When high accuracy is critical
 - Tasks where errors would be costly
 
-CRITICAL INSTRUCTION: 
+CRITICAL INSTRUCTION:
 NEVER respond to the Supervisor with browser instructions in your messages.
 ALWAYS use the browser_agent_tool for ALL browser interactions.
 For complex tasks, break them down into a series of organized tool calls.
@@ -182,27 +179,44 @@ For complex research tasks, break them down into multiple focused search queries
             ),
             browser_agent.as_tool(
                 tool_name="browser_agent_tool",
-                tool_description="""Use this tool for ALL website interactions, both simple and complex.
+                tool_description="""Use this tool for ALL website interactions that can use CSS selectors.
 
 Input parameters:
 - input: The browsing task to perform (required)
 - model: "gpt-4o-mini" (default, faster, cheaper, 70% accuracy) or "gpt-4o" (full capability)
 
-This tool handles all web interactions. For complex tasks, break them down into a series of focused browser interactions.
+This tool handles all selector-based web interactions and maintains browser state automatically between calls.
+The tool tracks visited URLs, navigation history, cookies, and session data.
+
+For complex tasks, break them down into a series of focused browser interactions.
 
 NEVER send browser instructions directly to the user.
 Provide high-level goals, not specific commands.
 
 Use "gpt-4o-mini" for simple browsing and "gpt-4o" for complex interactions.
-For multi-step web tasks, make multiple tool calls, tracking progress and state between calls.""",
+For multi-step web tasks, make multiple tool calls, knowing that session state is maintained across calls.""",
+            ),
+            computer_agent.as_tool(
+                tool_name="computer_agent_tool",
+                tool_description="""Use this tool ONLY for computer vision-based browser interactions when CSS selectors don't work.
+
+Input parameters:
+- input: The visual browser interaction task to perform (required)
+
+This tool uses computer vision to interact with the browser and is significantly more expensive than browser_agent_tool.
+ONLY use this when browser_agent has failed with standard selector-based approaches.
+
+The computer_agent uses a specialized model optimized for vision-based interaction.
+
+This tool helps with:
+- Complex visual interactions where selectors are difficult to identify
+- Interactive elements generated dynamically or with complex structure
+- Situations where clicking at specific coordinates is necessary
+
+Provide clear, high-level goals and let the agent determine how to visually interact with the page.""",
             ),
         ],
-        handoffs=[
-            # Add handoff back to supervisor
-            Agent(name="Supervisor"),
-        ],
-        model=model,
-        model_settings=ModelSettings()
+        model_settings=ModelSettings(tool_choice="required"),
     )
-    
+
     return agent

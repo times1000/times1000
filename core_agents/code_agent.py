@@ -2,7 +2,7 @@
 code_agent.py - Specialized agent for writing, explaining and modifying code
 """
 
-from agents import Agent, function_tool
+from agents import Agent, ModelSettings, function_tool
 import subprocess
 from typing import Optional
 
@@ -15,7 +15,7 @@ def run_claude_code(prompt: str, working_directory: Optional[str] = None) -> str
     try:
         # Run claude with specific flags for non-interactive usage
         command = ["claude", "--print", "--dangerously-skip-permissions", "-p", prompt]
-        
+
         result = subprocess.run(
             command,
             cwd=working_directory,
@@ -23,14 +23,14 @@ def run_claude_code(prompt: str, working_directory: Optional[str] = None) -> str
             text=True,
             check=False
         )
-        
+
         # Check for any errors
         if result.returncode != 0:
             return f"ERROR: Claude execution failed with code {result.returncode}\nSTDERR: {result.stderr}"
-        
+
         # Return the output
         return result.stdout
-        
+
     except Exception as e:
         return f"Error executing Claude Code: {str(e)}"
 
@@ -73,4 +73,5 @@ SELF-SUFFICIENCY PRINCIPLES:
     """,
         handoff_description="A specialized agent for writing, explaining and modifying code",
         tools=[run_claude_code],
+        model_settings=ModelSettings(tool_choice="required"),
     )

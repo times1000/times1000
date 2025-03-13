@@ -2,9 +2,9 @@
 search_agent.py - Specialized agent for web searches and information gathering
 """
 
-from agents import Agent, WebSearchTool
+from agents import Agent, ModelSettings, WebSearchTool
 
-async def create_search_agent():
+def create_search_agent():
     """Creates a search agent with web search capabilities."""
     # Create the agent with web search tool only
     return Agent(
@@ -38,4 +38,5 @@ SELF-SUFFICIENCY PRINCIPLES:
         """,
         handoff_description="A specialized agent for web searches and information gathering",
         tools=[WebSearchTool()],
+        model_settings=ModelSettings(tool_choice="required"),
     )

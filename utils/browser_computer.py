@@ -243,7 +243,7 @@ def create_browser_tools(browser_computer):
                            width: Optional[int] = None, 
                            height: Optional[int] = None,
                            format: Optional[str] = None,
-                           context_wrapper: Optional[Any] = None) -> str:
+                           context_wrapper: Optional[Dict[str, Any]] = None) -> str:
         """
         Navigate the browser to a specific URL with configurable options.
         

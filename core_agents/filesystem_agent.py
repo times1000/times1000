@@ -2,7 +2,7 @@
 filesystem_agent.py - Specialized agent for file system operations and project organization
 """
 
-from agents import Agent, function_tool
+from agents import Agent, ModelSettings, function_tool
 import subprocess
 from typing import Optional
 
@@ -51,4 +51,5 @@ SELF-SUFFICIENCY PRINCIPLES:
     """,
         handoff_description="A specialized agent for file system operations and project organization",
         tools=[run_shell_command],
+        model_settings=ModelSettings(tool_choice="required"),
     )
