@@ -1,23 +1,16 @@
 """
-main.py - Entry point for the Times1000 application with parallel supervisor agent orchestration
+main.py - Entry point for the Times1000 application with supervisor agent orchestration
 
-This script implements a parallel supervisor agent that delegates tasks to specialized agents:
+This script implements a supervisor agent that delegates tasks to specialized agents:
 - CodeAgent: Handles code writing, debugging, and explanation
 - FilesystemAgent: Manages file operations and project organization
 - SearchAgent: Performs web searches for information gathering
 - BrowserAgent: Directly interacts with websites via browser automation
 
-The parallel supervisor follows a structured workflow:
-1. Planning: Analyze requests, create step-by-step plans, and identify parallelization opportunities
-2. Execution: Delegate tasks to specialized agents with dependency tracking and prioritization
-3. Result Aggregation: Combine results from parallel task execution
-4. Verification: Ensure all success criteria are met
-
-The system supports:
-- Concurrent execution of independent tasks
-- Priority-based task scheduling
-- Dependency tracking between related tasks
-- Result aggregation from parallel executions
+The supervisor follows a structured workflow:
+1. Planning: Analyze requests and create step-by-step plans
+2. Execution: Delegate tasks to specialized agents based on their capabilities
+3. Verification: Ensure all success criteria are met
 """
 
 import os
@@ -64,9 +57,6 @@ from rich.console import Console
 
 # Import our browser computer implementation
 from utils.browser_computer import LocalPlaywrightComputer
-
-# Import our user interaction controller
-from utils.user_interaction import UserInteractionController, QuestionPriority, QuestionCategory
 
 # Import the supervisor agent creator from our core_agents package
 from core_agents.supervisor import create_supervisor_agent
@@ -194,7 +184,7 @@ def setup_readline():
     try:
         # Use a persistent history file in the user's home directory
         home_dir = os.path.expanduser("~")
-        history_dir = os.path.join(home_dir, ".times2000_history")
+        history_dir = os.path.join(home_dir, ".times1000_history")
         
         # Create directory if it doesn't exist
         os.makedirs(history_dir, exist_ok=True)
@@ -203,13 +193,10 @@ def setup_readline():
         # If we still can't access the history file location, fallback to current directory
         if not os.access(history_dir, os.W_OK):
             # Use current directory as fallback
-            histfile = os.path.join(os.getcwd(), ".times2000_history")
+            histfile = os.path.join(os.getcwd(), ".times1000_history")
         
         # Set history length
         readline.set_history_length(1000)
-        
-        # Add a test entry to history to verify it works
-        readline.add_history("test command")
         
         # Configure readline based on which module we're using
         if readline_module == "gnureadline":
@@ -291,15 +278,6 @@ async def main():
     parser.add_argument("--skip-key-check",
                         help="Skip the API key check (for testing only)",
                         action="store_true")
-    parser.add_argument("--batch-questions",
-                        help="Enable question batching to reduce interruptions",
-                        type=str, choices=['true', 'false'], default='true')
-    parser.add_argument("--batch-size",
-                        help="Maximum number of questions to batch together",
-                        type=int, default=3)
-    parser.add_argument("--batch-timeout",
-                        help="Maximum time (seconds) to wait before asking batched questions",
-                        type=float, default=30.0)
     args = parser.parse_args()
     
     # Check for required API keys unless specifically skipped
@@ -322,36 +300,7 @@ async def main():
             # We'll handle cleanup in the main loop exception handlers instead
         return browser_computer
     
-    # Initialize user interaction controller for batching questions
-    interaction_controller = UserInteractionController(
-        max_batch_size=args.batch_size,
-        batch_timeout_seconds=args.batch_timeout
-    )
-    
-    # Create a function to ask a question through the interaction controller
-    async def ask_user(question: str, 
-                      category: QuestionCategory = QuestionCategory.OTHER,
-                      priority: QuestionPriority = QuestionPriority.MEDIUM,
-                      context: Dict[str, Any] = None,
-                      timeout_seconds: Optional[float] = None) -> str:
-        """Ask a question to the user through the interaction controller"""
-        if args.batch_questions.lower() == 'true':
-            return await interaction_controller.ask_question(
-                question_text=question,
-                category=category,
-                priority=priority,
-                context=context,
-                timeout_seconds=timeout_seconds
-            )
-        else:
-            # Direct question without batching if batching is disabled
-            print(f"\n[QUESTION] {question}")
-            if context:
-                print("\nContext:")
-                for key, value in context.items():
-                    if not key.startswith('_'):  # Skip internal keys
-                        print(f"- {key}: {value}")
-            return await asyncio.get_event_loop().run_in_executor(None, input, "> ")
+    # Browser computer will be initialized when needed (lazy loading)
         
     # Create the supervisor agent with parallel execution capabilities
     agent = await create_supervisor_agent(init_browser)
@@ -365,22 +314,7 @@ async def main():
     # Add a first message to the conversation to prime the agent
     input_items.append({
         "role": "system", 
-        "content": """IMPORTANT AGENT SELECTION AND EXECUTION GUIDELINES:
-
-PARALLEL EXECUTION CAPABILITIES:
-- You can now execute multiple agent tasks in parallel
-- Use these tools to manage parallel execution:
-  * add_task: Queue a task for execution
-  * execute_all_tasks: Run all queued tasks in parallel
-  * get_result: Get results of a specific task
-  * aggregate_results: Combine results from multiple tasks
-  * cancel_task: Cancel a queued task that hasn't started
-
-TASK PRIORITIZATION AND DEPENDENCIES:
-- Assign priorities (HIGH, MEDIUM, LOW) to tasks
-- Define dependencies between tasks when needed
-- Independent tasks will execute in parallel
-- Dependent tasks will wait for prerequisites to complete
+        "content": """IMPORTANT AGENT SELECTION GUIDELINES:
 
 AGENT SELECTION GUIDELINES:
 1. For web browsing and website interaction tasks:
@@ -412,6 +346,22 @@ AGENT SELECTION GUIDELINES:
      * "search for Y"
      * "look up Z"
      * "research topic X"
+
+3. For file system operations:
+   - Delegate to filesystem_agent
+   - This includes requests like:
+     * "create file X"
+     * "read file Y"
+     * "list directory Z"
+     * "organize files"
+
+4. For coding tasks:
+   - Delegate to code_agent
+   - This includes requests like:
+     * "write code for X"
+     * "debug this function"
+     * "explain this code"
+     * "optimize this algorithm"
 
 Whenever a user mentions a specific website, web interaction, or browsing action, ALWAYS use browser_agent.
 The browser_agent should always prefer direct Playwright tools over ComputerTool for faster, more reliable interactions."""
@@ -457,11 +407,6 @@ The browser_agent should always prefer direct Playwright tools over ComputerTool
 
                     # Process streamed response
                     with trace("Task processing"):
-                        # Check if our agent is using the parallel implementation
-                        if hasattr(agent, 'parallel_supervisor'):
-                            # Using parallel execution
-                            print("\nUsing parallel execution...")
-                            
                         # Process the response as usual
                         result = await process_streamed_response(agent, input_items)
 

@@ -622,10 +622,6 @@ async def create_browser_agent(browser_initializer):
     import json
     from functools import wraps
     import asyncio
-    
-    # We'll keep the original agent reference with no changes
-    # (This was causing a self-reference issue)
-    
     return Agent(
         name="BrowserAgent",
         instructions="""You are a browser interaction expert specializing in website navigation and interaction, with enhanced error handling and recovery capabilities.

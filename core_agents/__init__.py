@@ -3,13 +3,11 @@ core_agents package - Collection of specialized agents for the Times1000 project
 """
 
 import logging
-from utils.message_bus import MessageBus
 
 class BaseAgent:
     """Base class for all agents with common functionality."""
     
-    def __init__(self, message_bus=None):
-        self.message_bus = message_bus or MessageBus()
+    def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.info(f"{self.__class__.__name__} initialized")
     
