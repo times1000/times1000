@@ -29,19 +29,19 @@ T = TypeVar('T')
 def create_resilient_browser_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
     """
     Wraps browser tools with retry logic for increased resilience
-    
+
     Args:
         browser_tools: Dictionary of browser tools
-        
+
     Returns:
         Dictionary of wrapped browser tools with retry capabilities
     """
     resilient_tools = {}
-    
+
     for tool_name, tool in browser_tools.items():
         if callable(getattr(tool, 'call', None)):
             original_call = tool.call
-            
+
             # Different tools need different retry strategies
             if "navigate" in tool_name:
                 # Navigation needs more retries with longer backoff
@@ -68,13 +68,13 @@ def create_resilient_browser_tools(browser_tools: Dict[str, Any]) -> Dict[str, A
                 max_retries = 2
                 strategy = RetryStrategy.LINEAR_BACKOFF
                 base_delay = 1.0
-            
+
             @wraps(original_call)
-            async def resilient_call(self, *args, _original_call=original_call, 
-                                    _max_retries=max_retries, _strategy=strategy, 
+            async def resilient_call(self, *args, _original_call=original_call,
+                                    _max_retries=max_retries, _strategy=strategy,
                                     _base_delay=base_delay, **kwargs):
                 """Wrapped call function with retry logic"""
-                
+
                 # Define the function to retry
                 async def call_with_args():
                     try:
@@ -83,14 +83,14 @@ def create_resilient_browser_tools(browser_tools: Dict[str, Any]) -> Dict[str, A
                     except Exception as e:
                         logger.warning(f"Error in browser tool: {str(e)}")
                         raise
-                
+
                 # Apply retry logic
                 retry_result = await with_retry(
                     max_retries=_max_retries,
                     retry_strategy=_strategy,
                     base_delay=_base_delay
                 )(call_with_args)()
-                
+
                 # Convert AgentResult to appropriate return format
                 if isinstance(retry_result, AgentResult):
                     if retry_result.success:
@@ -100,7 +100,7 @@ def create_resilient_browser_tools(browser_tools: Dict[str, Any]) -> Dict[str, A
                         error_msg = f"Failed after {retry_result.retry_count} attempts: {retry_result.error_message}"
                         if retry_result.retry_count > 0:
                             error_msg += f" (Retried {retry_result.retry_count} times)"
-                        
+
                         # Return error details in a format that matches original tool's error format
                         if hasattr(self, 'build_error_output'):
                             return self.build_error_output(error_msg)
@@ -110,28 +110,28 @@ def create_resilient_browser_tools(browser_tools: Dict[str, Any]) -> Dict[str, A
                 else:
                     # Should not happen, but handle just in case
                     return retry_result
-            
+
             # Replace the original call method with our resilient version
             tool.call = resilient_call.__get__(tool, type(tool))
-        
+
         # Add the (potentially) wrapped tool to our result dictionary
         resilient_tools[tool_name] = tool
-    
+
     return resilient_tools
 
 # Function to add CAPTCHA detection and solving tool
 def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
     """
     Adds CAPTCHA detection and solving capabilities to the browser tools
-    
+
     Args:
         browser_tools: Dictionary of browser tools
-        
+
     Returns:
         Dictionary of browser tools with added CAPTCHA handling
     """
     from agents.tool import function_tool
-    
+
     @function_tool
     async def detect_and_solve_captcha():
         """
@@ -142,19 +142,19 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
         - hCaptcha
         - Simple image CAPTCHAs
         - Text-based CAPTCHAs
-        
+
         Returns:
             A message indicating whether a CAPTCHA was found and if it was solved
         """
         # Get the browser computer
         bc = browser_tools["playwright_navigate"].browser_computer
-        
+
         if not bc._page:
             return "Error: Browser is not initialized or no page is currently open"
-        
+
         try:
             print("Checking for CAPTCHA presence...")
-            
+
             # Execute a comprehensive CAPTCHA detection script
             captcha_detection_script = """
             () => {
@@ -162,13 +162,13 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
                 const isVisible = (element) => {
                     if (!element) return false;
                     const style = window.getComputedStyle(element);
-                    return style.display !== 'none' && 
-                           style.visibility !== 'hidden' && 
+                    return style.display !== 'none' &&
+                           style.visibility !== 'hidden' &&
                            style.opacity !== '0' &&
                            element.offsetWidth > 0 &&
                            element.offsetHeight > 0;
                 };
-                
+
                 // Find and analyze potential CAPTCHA elements
                 const captchaResults = {
                     found: false,
@@ -177,36 +177,36 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
                     selectors: {},
                     frameSrc: null
                 };
-                
+
                 // Check for Google reCAPTCHA
                 const recaptchaFrames = Array.from(document.querySelectorAll('iframe[src*="recaptcha"]'));
                 const recaptchaElements = Array.from(document.querySelectorAll('.g-recaptcha, .recaptcha, [data-sitekey], [data-recaptcha]'));
                 const recaptchaCheckbox = document.querySelector('.recaptcha-checkbox');
-                
+
                 // Check for hCaptcha
                 const hcaptchaFrames = Array.from(document.querySelectorAll('iframe[src*="hcaptcha"]'));
                 const hcaptchaElements = Array.from(document.querySelectorAll('.h-captcha, [data-hcaptcha-sitekey]'));
-                
+
                 // Check for common CAPTCHA keywords in the page content
                 const pageText = document.body.innerText.toLowerCase();
                 const captchaKeywords = ['captcha', 'robot', 'human verification', 'security check', 'verify you are human'];
                 const keywordMatch = captchaKeywords.some(keyword => pageText.includes(keyword));
-                
+
                 // Check for common CAPTCHA input fields
                 const captchaInputs = Array.from(document.querySelectorAll('input[name*="captcha"], input[id*="captcha"], input[placeholder*="captcha"]'));
-                
+
                 // Check for image CAPTCHAs (images near input fields with CAPTCHA-related text)
                 let imageCaptchas = [];
                 document.querySelectorAll('img').forEach(img => {
                     // Check if image is near input field or has CAPTCHA-related attributes
-                    const nearInput = img.parentElement?.querySelector('input') || 
+                    const nearInput = img.parentElement?.querySelector('input') ||
                                       img.parentElement?.parentElement?.querySelector('input');
-                    
-                    const hasCaptchaAttr = img.src.toLowerCase().includes('captcha') || 
+
+                    const hasCaptchaAttr = img.src.toLowerCase().includes('captcha') ||
                                           (img.alt && img.alt.toLowerCase().includes('captcha')) ||
                                           (img.id && img.id.toLowerCase().includes('captcha')) ||
                                           (img.className && img.className.toLowerCase().includes('captcha'));
-                    
+
                     if ((nearInput && isVisible(img)) || hasCaptchaAttr) {
                         imageCaptchas.push({
                             src: img.src,
@@ -215,10 +215,10 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
                         });
                     }
                 });
-                
+
                 // Determine if any CAPTCHA is present
                 if (
-                    (recaptchaFrames.length > 0 && recaptchaFrames.some(frame => isVisible(frame))) || 
+                    (recaptchaFrames.length > 0 && recaptchaFrames.some(frame => isVisible(frame))) ||
                     (recaptchaElements.length > 0 && recaptchaElements.some(el => isVisible(el))) ||
                     (hcaptchaFrames.length > 0 && hcaptchaFrames.some(frame => isVisible(frame))) ||
                     (hcaptchaElements.length > 0 && hcaptchaElements.some(el => isVisible(el))) ||
@@ -227,14 +227,14 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
                     (recaptchaCheckbox && isVisible(recaptchaCheckbox))
                 ) {
                     captchaResults.found = true;
-                    
+
                     // Identify CAPTCHA type
                     if (recaptchaFrames.length > 0 || recaptchaElements.length > 0 || recaptchaCheckbox) {
                         captchaResults.type = 'reCAPTCHA';
-                        
+
                         // Get all visible reCAPTCHA elements
                         const visibleReCaptchaElements = recaptchaElements.filter(el => isVisible(el));
-                        
+
                         if (recaptchaCheckbox && isVisible(recaptchaCheckbox)) {
                             captchaResults.details.version = 'v2-checkbox';
                             captchaResults.selectors.checkbox = '.recaptcha-checkbox';
@@ -243,7 +243,7 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
                         } else {
                             captchaResults.details.version = 'v2';
                         }
-                        
+
                         // Get frame sources if available
                         if (recaptchaFrames.length > 0) {
                             const visibleFrames = recaptchaFrames.filter(frame => isVisible(frame));
@@ -253,7 +253,7 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
                         }
                     } else if (hcaptchaFrames.length > 0 || hcaptchaElements.length > 0) {
                         captchaResults.type = 'hCaptcha';
-                        
+
                         // Get frame sources if available
                         if (hcaptchaFrames.length > 0) {
                             const visibleFrames = hcaptchaFrames.filter(frame => isVisible(frame));
@@ -266,16 +266,16 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
                         captchaResults.details.images = imageCaptchas;
                     } else if (captchaInputs.length > 0) {
                         captchaResults.type = 'text-captcha';
-                        
+
                         // Get all visible CAPTCHA inputs
                         const visibleCaptchaInputs = captchaInputs.filter(input => isVisible(input));
-                        
+
                         if (visibleCaptchaInputs.length > 0) {
                             captchaResults.selectors.inputs = visibleCaptchaInputs.map(input => {
-                                const inputSelector = input.id ? 
-                                    `#${input.id}` : 
-                                    (input.name ? 
-                                        `input[name="${input.name}"]` : 
+                                const inputSelector = input.id ?
+                                    `#${input.id}` :
+                                    (input.name ?
+                                        `input[name="${input.name}"]` :
                                         `input[placeholder="${input.placeholder}"]`);
                                 return inputSelector;
                             });
@@ -287,25 +287,25 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
                     captchaResults.type = 'text-based';
                     captchaResults.details.keywords = captchaKeywords.filter(keyword => pageText.includes(keyword));
                 }
-                
+
                 // Find submit buttons near CAPTCHA elements if CAPTCHA is found
                 if (captchaResults.found) {
                     // Look for submit buttons
                     const possibleSubmitButtons = Array.from(document.querySelectorAll('button[type="submit"], input[type="submit"], button:not([type]), .g-recaptcha + button, .h-captcha + button'));
-                    
+
                     // Also look for elements with "submit", "verify", "continue" text
                     const textButtons = Array.from(document.querySelectorAll('button, a.button, .btn, [role="button"]'))
                         .filter(el => {
                             const text = el.innerText.toLowerCase();
-                            return text.includes('submit') || 
-                                  text.includes('verify') || 
+                            return text.includes('submit') ||
+                                  text.includes('verify') ||
                                   text.includes('continue') ||
                                   text.includes('next');
                         });
-                    
+
                     const allPossibleButtons = [...possibleSubmitButtons, ...textButtons];
                     const visibleButtons = allPossibleButtons.filter(btn => isVisible(btn));
-                    
+
                     if (visibleButtons.length > 0) {
                         captchaResults.selectors.submitButtons = visibleButtons.map(btn => {
                             // Generate a selector for this button
@@ -321,57 +321,57 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
                         });
                     }
                 }
-                
+
                 return captchaResults;
             }
             """
-            
+
             # Run detection script
             captcha_results = await bc._page.evaluate(captcha_detection_script)
-            
+
             if not captcha_results.get('found', False):
                 return "No CAPTCHA detected on current page."
-            
+
             # Log CAPTCHA detection details
             captcha_type = captcha_results.get('type', 'unknown')
             print(f"CAPTCHA detected! Type: {captcha_type}")
             print(f"CAPTCHA details: {captcha_results}")
-            
+
             # Take a screenshot of the CAPTCHA for analysis
             screenshot_name = "captcha_detected"
             png_bytes = await bc._page.screenshot(full_page=False)
             import base64
             screenshot_b64 = base64.b64encode(png_bytes).decode("utf-8")
-            
+
             # Different solving strategies based on CAPTCHA type
             if captcha_type == 'reCAPTCHA':
                 version = captcha_results.get('details', {}).get('version', 'v2')
-                
+
                 if version == 'v2-checkbox':
                     # Handle reCAPTCHA v2 checkbox
                     checkbox_selector = captcha_results.get('selectors', {}).get('checkbox', '.recaptcha-checkbox')
-                    
+
                     try:
                         # 1. Click the reCAPTCHA checkbox
                         print(f"Clicking reCAPTCHA checkbox: {checkbox_selector}")
                         await bc._page.click(checkbox_selector, timeout=5000)
                         await asyncio.sleep(2)  # Wait for potential challenges to appear
-                        
+
                         # 2. Check if we need to solve a challenge
                         frame_selector = 'iframe[title="recaptcha challenge expires in two minutes"]'
                         challenge_frame = bc._page.frame_locator(frame_selector)
-                        
+
                         if challenge_frame:
                             # Take a screenshot of the challenge
                             challenge_screenshot = await bc._page.screenshot(full_page=False)
                             challenge_b64 = base64.b64encode(challenge_screenshot).decode("utf-8")
-                            
+
                             # We have a challenge to solve - this is just a stub implementation
                             # For a real implementation, you would need to:
                             # 1. Analyze the type of challenge (image selection, audio, etc.)
                             # 2. Use computer vision or audio processing to solve
                             # 3. Submit the solution
-                            
+
                             # For now, just click through the challenge (this won't actually solve it)
                             await bc._page.evaluate("""
                             () => {
@@ -391,19 +391,19 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
                                     }
                                 `;
                                 document.head.appendChild(style);
-                                
+
                                 const indicator = document.createElement('div');
                                 indicator.className = 'captcha-solving-indicator';
                                 indicator.textContent = 'Attempting to solve CAPTCHA...';
                                 document.body.appendChild(indicator);
-                                
+
                                 // The indicator will be automatically removed when the page changes
                             }
                             """)
-                            
+
                             # Wait for some time to see if the reCAPTCHA resolves
                             await asyncio.sleep(5)
-                            
+
                             return "Detected reCAPTCHA v2 with challenge. Attempted to solve but may require human verification."
                         else:
                             # Check if the checkbox is now checked (success)
@@ -413,7 +413,7 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
                                 return checkbox && checkbox.getAttribute('aria-checked') === 'true';
                             }}
                             """)
-                            
+
                             if is_checked:
                                 # Find and click submit button if available
                                 submit_buttons = captcha_results.get('selectors', {}).get('submitButtons', [])
@@ -425,14 +425,14 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
                                             break
                                         except Exception as e:
                                             print(f"Could not click submit button {button_selector}: {e}")
-                                
+
                                 return "Successfully solved reCAPTCHA v2 checkbox!"
                             else:
                                 return "Clicked reCAPTCHA checkbox but verification unsuccessful."
                     except Exception as e:
                         print(f"Error solving reCAPTCHA: {e}")
                         return f"Error while attempting to solve reCAPTCHA: {e}"
-                
+
                 elif version == 'v3-invisible':
                     # For invisible reCAPTCHA, we usually need to just proceed with the form submission
                     submit_buttons = captcha_results.get('selectors', {}).get('submitButtons', [])
@@ -444,35 +444,35 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
                                 break
                             except Exception as e:
                                 print(f"Could not click submit button {button_selector}: {e}")
-                    
+
                     # Check if we're still on the same page or if we moved to a new page
                     current_url = bc._page.url
                     return f"Attempted to proceed with invisible reCAPTCHA by submitting the form. Current URL: {current_url}"
-                
+
                 else:
                     # Generic reCAPTCHA handling
                     return f"Detected reCAPTCHA (version: {version}). Manual solving may be required."
-            
+
             elif captcha_type == 'hCaptcha':
                 # hCaptcha usually requires similar handling to reCAPTCHA
                 return "Detected hCaptcha. Manual solving may be required."
-            
+
             elif captcha_type == 'image-captcha':
                 # For image CAPTCHAs, we'd need OCR capabilities
                 images = captcha_results.get('details', {}).get('images', [])
                 if images:
                     image_selector = images[0].get('selector')
-                    
+
                     # Find nearby input fields
                     input_fields = await bc._page.evaluate(f"""
                     () => {{
                         const img = document.querySelector('{image_selector}');
                         if (!img) return [];
-                        
+
                         // Look for input fields near the image
                         const container = img.closest('form') || img.parentElement || img.parentElement.parentElement;
                         if (!container) return [];
-                        
+
                         const inputs = Array.from(container.querySelectorAll('input[type="text"]'));
                         return inputs.map(input => {{
                             return {{
@@ -483,12 +483,12 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
                         }}).filter(input => input.selector);
                     }}
                     """)
-                    
+
                     if input_fields:
                         # For a real implementation, we would use OCR here to read the CAPTCHA image
                         # For now, just simulate a partial solution
                         input_selector = input_fields[0].get('selector')
-                        
+
                         if input_selector:
                             # Add visual indication that we're attempting to solve
                             await bc._page.evaluate("""
@@ -508,46 +508,46 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
                                     }
                                 `;
                                 document.head.appendChild(style);
-                                
+
                                 const indicator = document.createElement('div');
                                 indicator.className = 'captcha-solving-indicator';
                                 indicator.textContent = 'Attempting to solve image CAPTCHA...';
                                 document.body.appendChild(indicator);
                             }
                             """)
-                            
+
                             # This would be replaced with actual OCR in a real implementation
                             placeholder = input_fields[0].get('placeholder', '')
                             label = input_fields[0].get('label', '')
-                            
+
                             # For now, just report the CAPTCHA details
                             return f"Detected image CAPTCHA. Input field found ({input_selector}). Manual solving required."
-                    
+
                     return "Detected image CAPTCHA but couldn't find associated input field."
-                
+
                 return "Detected image CAPTCHA. Manual solving may be required."
-            
+
             elif captcha_type == 'text-captcha':
                 # For text CAPTCHAs, we need to find the question and provide an answer
                 inputs = captcha_results.get('selectors', {}).get('inputs', [])
                 if inputs:
                     input_selector = inputs[0]
-                    
+
                     # Get the text around the input to understand the CAPTCHA question
                     captcha_text = await bc._page.evaluate(f"""
                     () => {{
                         const input = document.querySelector('{input_selector}');
                         if (!input) return '';
-                        
+
                         // Find the closest container
                         const container = input.closest('form') || input.parentElement || input.parentElement.parentElement;
                         if (!container) return '';
-                        
+
                         // Get text context around the input
                         return container.innerText;
                     }}
                     """)
-                    
+
                     # This would be replaced with actual text analysis in a real implementation
                     await bc._page.evaluate("""
                     () => {
@@ -566,35 +566,35 @@ def add_captcha_tools(browser_tools: Dict[str, Any]) -> Dict[str, Any]:
                             }
                         `;
                         document.head.appendChild(style);
-                        
+
                         const indicator = document.createElement('div');
                         indicator.className = 'captcha-solving-indicator';
                         indicator.textContent = 'Text CAPTCHA detected. Manual solving required.';
                         document.body.appendChild(indicator);
                     }
                     """)
-                    
+
                     # For now, just report the CAPTCHA text
                     captcha_preview = captcha_text[:200] + "..." if len(captcha_text) > 200 else captcha_text
                     return f"Detected text CAPTCHA. Question context: '{captcha_preview}'. Manual solving required."
-                
+
                 return "Detected text CAPTCHA but couldn't find associated input field."
-            
+
             elif captcha_type == 'text-based':
                 # Generic text-based CAPTCHA detection based on keywords
                 keywords = captcha_results.get('details', {}).get('keywords', [])
                 return f"Detected possible CAPTCHA based on keywords: {', '.join(keywords)}. Manual verification may be required."
-            
+
             else:
                 return f"Detected unknown CAPTCHA type: {captcha_type}. Manual solving may be required."
-            
+
         except Exception as e:
             print(f"Error in CAPTCHA detection: {e}")
             return f"Error while attempting to detect CAPTCHA: {e}"
-    
+
     # Add our CAPTCHA detection tool to the tools dict
     browser_tools["detect_and_solve_captcha"] = detect_and_solve_captcha
-    
+
     return browser_tools
 
 async def create_browser_agent(browser_initializer):
@@ -602,13 +602,13 @@ async def create_browser_agent(browser_initializer):
     # Initialize the browser only when needed
     try:
         browser_computer = await browser_initializer()
-        
-        # Get all browser tools 
+
+        # Get all browser tools
         base_browser_tools = create_browser_tools(browser_computer)
-        
+
         # Wrap tools with retry logic
         browser_tools = create_resilient_browser_tools(base_browser_tools)
-        
+
         # Add CAPTCHA detection and solving tools
         browser_tools = add_captcha_tools(browser_tools)
     except Exception as e:
@@ -616,7 +616,7 @@ async def create_browser_agent(browser_initializer):
         print(f"Error initializing browser or creating tools: {e}")
         # Re-raise to fail initialization
         raise
-    
+
     # Create a patched version of the browser agent that can handle JSON-encoded inputs
     # We'll create this by extending the Agent class
     import json
@@ -686,7 +686,7 @@ DIRECT PLAYWRIGHT TOOLS:
      * playwright_screenshot(name="fullpage", fullPage=True)
 
 3. playwright_click: Click elements by CSS selector
-   - Examples: 
+   - Examples:
      * playwright_click(selector=".submit-button")
      * playwright_click(selector="#login-button")
      * playwright_click(selector="button[type='submit']")
@@ -728,7 +728,7 @@ DIRECT PLAYWRIGHT TOOLS:
 
 11. playwright_keypress: Press keyboard keys or key combinations
    - Example: playwright_keypress(key="Enter")
-   - Example: playwright_keypress(key="ArrowDown") 
+   - Example: playwright_keypress(key="ArrowDown")
    - Example: playwright_keypress(key="Control+a")
    - Example: playwright_keypress(key="Tab", selector="input#search")
 
@@ -739,7 +739,7 @@ DIRECT PLAYWRIGHT TOOLS:
 
 13. Geolocation tool (for getting user location):
    - playwright_get_location()
-   - playwright_get_location(service="ipinfo", api_key="your_api_key") 
+   - playwright_get_location(service="ipinfo", api_key="your_api_key")
    - playwright_get_location(include_details=True, timeout=10000)
    - playwright_get_location(fallback_service="geojs", use_cache=True, language="en")
 
@@ -797,12 +797,12 @@ ERROR RECOVERY STRATEGIES:
    - Verify the URL is correctly formatted
    - Try increasing the timeout value
    - Check if the site is accessible
-   
+
 3. For timeout errors:
    - Try using a different waitUntil value (load, domcontentloaded, networkidle)
    - Break down complex actions into smaller steps
    - Check if the page has JavaScript that might be blocking
-   
+
 4. For CAPTCHA-related issues:
    - Use the detect_and_solve_captcha tool to identify and handle CAPTCHAs
    - If automatic solving fails, clearly explain the situation to the user
@@ -824,30 +824,26 @@ Always provide detailed error information to the user if an interaction fails af
             browser_tools["playwright_get_elements"],
             browser_tools["playwright_evaluate"],
             browser_tools["playwright_close"],
-            
+
             # HTTP request tools
             browser_tools["playwright_get"],
             browser_tools["playwright_post"],
             browser_tools["playwright_put"],
             browser_tools["playwright_patch"],
             browser_tools["playwright_delete"],
-            
+
             # Geolocation tool
             browser_tools["playwright_get_location"],
-            
+
             # Keyboard interaction tool
             browser_tools["playwright_keypress"],
-            
+
             # CAPTCHA detection and handling tool
             browser_tools["detect_and_solve_captcha"],
-            
-            # Legacy tools (only when direct tools don't work)
-            ComputerTool(browser_computer)
         ],
-        # Use computer-use-preview model when using ComputerTool
-        model="computer-use-preview",
         model_settings=ModelSettings(
             truncation="auto",
-            temperature=0.5  # Reduced temperature for more deterministic behavior
+            temperature=0.5,  # Reduced temperature for more deterministic behavior
+            tool_choice="required"
         )
     )
