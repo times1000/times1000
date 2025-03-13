@@ -12,6 +12,7 @@ from playwright.async_api import async_playwright, Browser, Page, Playwright, Br
 from markdownify import markdownify
 from bs4 import BeautifulSoup
 import re
+from bs4.element import Comment
 
 from agents import AsyncComputer, Button, Environment
 from agents.tool import function_tool
@@ -254,7 +255,7 @@ def create_browser_tools(browser_computer):
             format: Optional format for content - "html" (default), "text", or "markdown"
         
         Returns:
-            A message indicating successful navigation along with the complete HTML of the page by default
+            A message indicating successful navigation along with cleaned HTML or other requested format
         """
         bc = browser_computer
         if not bc._page:
@@ -338,8 +339,151 @@ def create_browser_tools(browser_computer):
             
             # Process based on requested format
             if content_format == "html" or not content_format:
-                # Return full HTML content
-                return f"Successfully navigated to: {current_url} - {page_title}\n\nHTML content:\n{html_content}"
+                try:
+                    # Clean HTML content by removing scripts and keeping only elements with content
+                    print("Cleaning HTML content to reduce size")
+                    soup = BeautifulSoup(html_content, 'html.parser')
+                    
+                    # Step 1: Remove all script and style tags
+                    for tag in soup.find_all(['script', 'style', 'noscript', 'iframe']):
+                        tag.decompose()
+                    
+                    # Step 2: Find and remove empty elements that don't contribute to content
+                    def is_element_empty(tag):
+                        # Check if tag is empty or contains only whitespace/empty elements
+                        if tag.name in ['br', 'hr', 'img', 'input', 'link', 'meta']:
+                            return False  # These tags are self-closing and important
+                        
+                        # Check text content
+                        text_content = tag.get_text(strip=True)
+                        if text_content:
+                            return False  # Has text, so not empty
+                        
+                        # Check for important attributes that make the element meaningful
+                        important_attrs = ['id', 'class', 'href', 'src', 'alt', 'title']
+                        for attr in important_attrs:
+                            if tag.has_attr(attr):
+                                return False  # Has important attribute, so keep it
+                        
+                        # Check for non-empty children (like images)
+                        for child in tag.find_all(['img', 'svg']):
+                            return False  # Has media child, so keep it
+                            
+                        return True  # No meaningful content found
+                    
+                    # Find all leaf nodes first (elements with no children except text)
+                    leaf_elements = [tag for tag in soup.find_all() if not tag.find_all(recursive=False)]
+                    
+                    # Remove empty leaf elements
+                    for tag in leaf_elements:
+                        if is_element_empty(tag):
+                            tag.decompose()
+                    
+                    # Step 3: Keep essential structure (html, head with title, body)
+                    # This is handled implicitly by BeautifulSoup
+                    
+                    # Get the cleaned HTML
+                    cleaned_html = str(soup)
+                    
+                    # For debugging, show size reduction percentage
+                    original_size = len(html_content)
+                    cleaned_size = len(cleaned_html)
+                    reduction = (original_size - cleaned_size) / original_size * 100
+                    print(f"HTML size reduced from {original_size} to {cleaned_size} bytes ({reduction:.1f}% reduction)")
+                    
+                    # Step 4: Apply more aggressive cleaning if the page is still very large (>250KB)
+                    # API limit is 256KB, so we need to stay under that
+                    MAX_SIZE = 250 * 1024  # 250 KB
+                    
+                    if cleaned_size > MAX_SIZE:
+                        print(f"HTML still too large ({cleaned_size/1024:.1f}KB). Applying more aggressive cleaning...")
+                        
+                        # Find main content area if possible
+                        main_content = None
+                        for container in ['main', 'article', '#content', '.content', '#main', '.main']:
+                            elements = soup.select(container)
+                            if elements:
+                                main_content = elements[0]
+                                print(f"Found main content container: {container}")
+                                break
+                        
+                        if main_content:
+                            # Extract just the main content with essential structure
+                            new_soup = BeautifulSoup("<html><head></head><body></body></html>", 'html.parser')
+                            
+                            # Preserve title
+                            if soup.title:
+                                title_tag = new_soup.new_tag("title")
+                                title_tag.string = soup.title.string if soup.title.string else "Page Title"
+                                new_soup.head.append(title_tag)
+                            
+                            # Add main content to body
+                            new_soup.body.append(main_content)
+                            
+                            # Update to new reduced soup
+                            soup = new_soup
+                        else:
+                            # No main content found, keep only important elements
+                            # Remove all comments
+                            for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
+                                comment.extract()
+                                
+                            # Remove specific tags that usually contain non-essential content
+                            for tag in soup.find_all(['footer', 'aside', 'nav', 'header', 'form']):
+                                tag.decompose()
+                                
+                            # Keep only elements with text content
+                            for tag in soup.find_all():
+                                if not tag.get_text(strip=True) and tag.name not in ['html', 'head', 'body', 'title']:
+                                    tag.decompose()
+                        
+                        # Get super-cleaned HTML
+                        super_cleaned_html = str(soup)
+                        super_cleaned_size = len(super_cleaned_html)
+                        super_reduction = (original_size - super_cleaned_size) / original_size * 100
+                        print(f"HTML further reduced to {super_cleaned_size} bytes ({super_reduction:.1f}% total reduction)")
+                        
+                        # If still too large, extract only text
+                        if super_cleaned_size > MAX_SIZE:
+                            print("HTML still too large after aggressive cleaning. Extracting only text content...")
+                            text_content = soup.get_text(separator='\n', strip=True)
+                            text_with_structure = f"""
+                            <html>
+                            <head>
+                                <title>{page_title}</title>
+                            </head>
+                            <body>
+                                <h1>{page_title}</h1>
+                                <p>{text_content}</p>
+                            </body>
+                            </html>
+                            """
+                            
+                            # Truncate if still too large
+                            if len(text_with_structure) > MAX_SIZE:
+                                truncated_text = text_content[:MAX_SIZE-200] + "... [Content truncated due to size]"
+                                text_with_structure = f"""
+                                <html>
+                                <head>
+                                    <title>{page_title}</title>
+                                </head>
+                                <body>
+                                    <h1>{page_title}</h1>
+                                    <p>{truncated_text}</p>
+                                </body>
+                                </html>
+                                """
+                                print(f"Text-only content truncated to {len(text_with_structure)} bytes")
+                            
+                            return f"Successfully navigated to: {current_url} - {page_title}\n\nHTML content (text-only):\n{text_with_structure}"
+                        
+                        return f"Successfully navigated to: {current_url} - {page_title}\n\nHTML content (aggressively cleaned):\n{super_cleaned_html}"
+                    
+                    return f"Successfully navigated to: {current_url} - {page_title}\n\nHTML content (cleaned):\n{cleaned_html}"
+                except Exception as clean_err:
+                    print(f"Error cleaning HTML: {type(clean_err).__name__}: {clean_err}")
+                    # Fall back to returning original HTML if cleaning fails
+                    return f"Successfully navigated to: {current_url} - {page_title}\n\nHTML content (uncleaned):\n{html_content}"
                 
             elif content_format == "markdown":
                 try:
@@ -437,8 +581,17 @@ def create_browser_tools(browser_computer):
                     print(f"Error processing page content: {type(e).__name__}: {e}")
                     return f"Successfully navigated to: {current_url} - {page_title}\nUnable to extract page content details."
             else:
-                # Default to returning HTML for any unrecognized format
-                return f"Successfully navigated to: {current_url} - {page_title}\n\nHTML content:\n{html_content}"
+                # Default to returning cleaned HTML for any unrecognized format
+                try:
+                    # Clean HTML as above
+                    soup = BeautifulSoup(html_content, 'html.parser')
+                    for tag in soup.find_all(['script', 'style', 'noscript', 'iframe']):
+                        tag.decompose()
+                    cleaned_html = str(soup)
+                    return f"Successfully navigated to: {current_url} - {page_title}\n\nHTML content (cleaned):\n{cleaned_html}"
+                except Exception:
+                    # Fall back to original HTML
+                    return f"Successfully navigated to: {current_url} - {page_title}\n\nHTML content:\n{html_content}"
         except Exception as e:
             print(f"Navigation error: {type(e).__name__}: {e}")
             return f"Error navigating to {url}: {e}"
