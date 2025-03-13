@@ -59,9 +59,6 @@ from agents import ToolCallItem, ToolCallOutputItem, handoff, trace
 from rich.markdown import Markdown
 from rich.console import Console
 
-# Import our browser computer implementation
-from utils.browser_computer import LocalPlaywrightComputer
-
 # Import the supervisor agent creator from our core_agents package
 from core_agents.supervisor import create_supervisor_agent
 
@@ -401,23 +398,9 @@ async def main():
     # Setup readline for command history
     readline_available = setup_readline()
 
-    # Initialize browser_computer as None - it will be created only when needed (lazy loading)
-    browser_computer = None
-
-    # Create the supervisor agent with a function to initialize the browser
-    async def init_browser():
-        nonlocal browser_computer
-        if browser_computer is None:
-            # Initialize browser when needed without verbose messages
-            browser_computer = await LocalPlaywrightComputer(headless=False, silent=True).__aenter__()
-            # Don't use atexit with asyncio.run() as it causes issues with closed event loops
-            # We'll handle cleanup in the main loop exception handlers instead
-        return browser_computer
-
-    # Browser computer will be initialized when needed (lazy loading)
-
-    # Create the supervisor agent with parallel execution capabilities
-    agent = await create_supervisor_agent(init_browser)
+    # Create the supervisor agent with on-demand browser initialization
+    # Each specialized agent will create its own browser instance only when needed
+    agent = await create_supervisor_agent()
 
     # Initialize conversation history
     input_items: List = []
@@ -476,12 +459,13 @@ async def main():
     except KeyboardInterrupt:
         print("\nKeyboard interrupt detected. Exiting.")
     finally:
-        # Proper cleanup of browser if it was initialized
-        if browser_computer is not None:
-            try:
-                await browser_computer.__aexit__(None, None, None)
-            except Exception as e:
-                print(f"Error during browser cleanup: {e}")
+        # Use supervisor cleanup to properly close all browser instances
+        try:
+            from core_agents.supervisor import cleanup_supervisor_agent
+            await cleanup_supervisor_agent(agent)
+            print("Successfully cleaned up all browser instances")
+        except Exception as e:
+            print(f"Error during browser cleanup: {e}")
 
     print("Exiting application")
 
